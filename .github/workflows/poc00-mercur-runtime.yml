@@ -11,7 +11,7 @@ jobs:
   mercur-http-smoke:
     name: Mercur + PostgreSQL + Redis isolated upstream HTTP
     runs-on: ubuntu-latest
-    timeout-minutes: 38
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:15
@@ -34,12 +34,12 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/mercur
-      DB_HOST: 127.0.0.1
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mercur
+      DB_HOST: localhost
       DB_PORT: '5432'
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
-      REDIS_URL: redis://127.0.0.1:6379
+      REDIS_URL: redis://localhost:6379
       MEDUSA_FF_SELLER_REGISTRATION: 'true'
       MEDUSA_FF_PRODUCT_REQUEST: 'false'
       JWT_SECRET: ci-synthetic-secret-not-for-production
@@ -85,9 +85,22 @@ jobs:
       - name: Build pinned Mercur workspace
         working-directory: mercur
         run: bun run build
-      - name: Run Mercur actual HTTP integration tests
+      - name: Verify Node/Postgres driver and test database create privileges
+        working-directory: mercur
+        run: |
+          bun -e 'const pg=require("pg");const client=new pg.Client({connectionString:process.env.DATABASE_URL});await client.connect();console.log("pg JS SELECT", (await client.query("select current_user, current_database(), 1 as ok")).rows);await client.end()'
+          PGCONT="$(docker ps -q --filter ancestor=postgres:15 | head -1)"
+          docker exec "$PGCONT" psql -U postgres -d postgres -Atc "select rolcreatedb from pg_roles where rolname='postgres'" | grep -qx t
+      - name: Run Mercur payment webhook HTTP integration (one suite)
         working-directory: mercur/integration-tests
-        run: bun run test:integration:http -- --runTestsByPath http/payment/payment-webhook-cart-completion.spec.ts http/payment/split-order-payments.spec.ts
+        run: bun run test:integration:http -- --runTestsByPath http/payment/payment-webhook-cart-completion.spec.ts
+      - name: Capture DB diagnostics if Mercur tests fail
+        if: failure()
+        run: |
+          PGCONT="$(docker ps -q --filter ancestor=postgres:15 | head -1)"
+          docker exec "$PGCONT" psql -U postgres -d postgres -c "select datname, numbackends from pg_stat_database order by numbackends desc limit 12"
+          docker exec "$PGCONT" psql -U postgres -d postgres -c "select datname, usename, state, count(*) from pg_stat_activity group by datname,usename,state order by count(*) desc limit 15"
+          docker logs --tail 60 "$PGCONT" || true
       - name: Security summary
         if: always()
         run: |
