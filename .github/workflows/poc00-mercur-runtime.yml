@@ -83,10 +83,9 @@ jobs:
       - name: Build pinned Mercur workspace
         working-directory: mercur
         run: bun run build
-      - name: Verify Node/Postgres driver and test database create privileges
-        working-directory: mercur
+      - name: Verify Bun Postgres driver TCP connection and test DB privileges
         run: |
-          bun -e 'const pg=require("pg");const client=new pg.Client({connectionString:process.env.DATABASE_URL});await client.connect();console.log("pg JS SELECT", (await client.query("select current_user, current_database(), 1 as ok")).rows);await client.end()'
+          bun np/poc/mercur-runtime/probe-db.mjs
           PGCONT="$(docker ps -q --filter ancestor=postgres:15 | head -1)"
           docker exec "$PGCONT" psql -U postgres -d postgres -Atc "select rolcreatedb from pg_roles where rolname='postgres'" | grep -qx t
       - name: Run Mercur payment webhook HTTP integration (one suite)
