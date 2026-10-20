@@ -1,9 +1,7 @@
 name: PoC00-B1 Mercur database and HTTP smoke (NO Stripe/AWS)
 on:
-  pull_request:
-    paths:
-      - 'poc/mercur-runtime/**'
-      - '.github/workflows/poc00-mercur-runtime.yml'
+  # Slow upstream integration: manual-only after a failure to avoid
+  # paying GitHub Actions minutes for every PoC commit.
   workflow_dispatch:
 permissions:
   contents: read
