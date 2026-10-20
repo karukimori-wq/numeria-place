@@ -37,3 +37,19 @@ jobs:
           node-version: '22'
       - name: Validate source-level baseline (not a Mercur runtime test)
         run: node np/poc/stripe-direct/scripts/audit-upstream.mjs upstream-mercur
+
+  real-stripe-sdk-local-signature:
+    name: Stripe SDK v23 local signing only
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Stripe SDK into disposable CI directory
+        run: npm install --prefix /tmp/np-stripe-sdk --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0
+      - name: Verify signature with actual SDK (zero network API requests)
+        env:
+          NODE_PATH: /tmp/np-stripe-sdk/node_modules
+        run: node poc/stripe-direct/scripts/test-real-stripe-sdk.cjs
