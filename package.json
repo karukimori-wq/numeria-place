@@ -8,6 +8,7 @@
     "typecheck": "npm run typegen && tsc --noEmit",
     "build": "react-router build",
     "test": "node --test tests/domain.test.mjs",
+    "e2e": "playwright test",
     "preview": "vite preview",
     "deploy": "echo 'Production deployment is forbidden in P1-A' && exit 1"
   },
@@ -19,7 +20,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.64.0",
-    "@cloudflare/workers-types": "4.20261019.0",
+    "@cloudflare/workers-types": "5.20261019.1",
     "@react-router/dev": "8.4.0",
     "@types/node": "24.10.1",
     "@types/react": "19.2.7",
