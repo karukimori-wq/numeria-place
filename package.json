@@ -19,6 +19,7 @@
     "isbot": "5.1.32"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
     "@cloudflare/vite-plugin": "1.64.0",
     "@cloudflare/workers-types": "5.20261019.1",
     "@react-router/dev": "8.4.0",

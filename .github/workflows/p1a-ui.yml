@@ -6,6 +6,7 @@ on:
       - "workers/**"
       - "tests/**"
       - "package.json"
+      - "package-lock.json"
       - "*.ts"
       - "wrangler.jsonc"
       - ".github/workflows/p1a-ui.yml"
@@ -21,8 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install dependencies without production credentials
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies without production credentials
+        run: npm ci --no-audit --no-fund
       - name: Test fixture invariants
         run: npm test
       - name: Typecheck
