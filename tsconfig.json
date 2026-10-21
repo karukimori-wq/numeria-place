@@ -29,6 +29,10 @@
       "node",
       "vite/client",
       "@cloudflare/workers-types"
+    ],
+    "rootDirs": [
+      ".",
+      "./.react-router/types"
     ]
   }
 }
