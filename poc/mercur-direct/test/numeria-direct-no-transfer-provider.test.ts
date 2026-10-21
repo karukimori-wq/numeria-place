@@ -89,7 +89,7 @@ describe("Mercur-compatible Direct account management + payout lockout",()=>{
     expect(res.action).toBe("account.activated");
     expect((res.data as any).id).toBe("poc_internal_A");
     await expect(provider().getWebhookActionAndData({
-      rawData:payload.replace('"true"','"false"'),headers:{"stripe-signature":signature}
+      rawData:payload.replace('"charges_enabled":true','"charges_enabled":false'),headers:{"stripe-signature":signature}
     } as any)).rejects.toThrow();
   });
 
