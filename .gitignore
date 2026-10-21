@@ -1,0 +1,10 @@
+node_modules/
+.react-router/
+build/
+.wrangler/
+.playwright/
+playwright-report/
+test-results/
+.DS_Store
+.env*
+!.env.example
