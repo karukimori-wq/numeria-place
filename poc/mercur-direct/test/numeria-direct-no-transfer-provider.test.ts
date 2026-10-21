@@ -82,7 +82,7 @@ describe("Mercur-compatible Direct account management + payout lockout",()=>{
       metadata:{account_id:"poc_internal_A"},requirements:{currently_due:[],past_due:[]}
     }}};
     const payload=JSON.stringify(e);
-    const signature=sdk.webhooks.generateTestHeaderString({payload,secret:webhookSecret});
+    const signature=await sdk.webhooks.generateTestHeaderStringAsync({payload,secret:webhookSecret});
     const res=await provider().getWebhookActionAndData({
       rawData:payload,headers:{"stripe-signature":signature}
     } as any);
@@ -98,7 +98,7 @@ describe("Mercur-compatible Direct account management + payout lockout",()=>{
       metadata:{account_id:"poc_internal_A"}};
     const signed=async (acct:unknown)=>{
       const payload=JSON.stringify({id:"evt_poc_2",type:"account.updated",data:{object:acct}});
-      const signature=sdk.webhooks.generateTestHeaderString({payload,secret:webhookSecret});
+      const signature=await sdk.webhooks.generateTestHeaderStringAsync({payload,secret:webhookSecret});
       return provider().getWebhookActionAndData({
         rawData:payload,headers:{"stripe-signature":signature}
       } as any);
