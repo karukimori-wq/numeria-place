@@ -20,7 +20,9 @@ jobs:
         run: npm install --prefix poc/mercur-direct --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0
       - name: Test payout adapter fail-closed + Stripe local signatures
         run: bun test poc/mercur-direct/test/numeria-direct-no-transfer-provider.test.ts
-      - name: Test B3 Direct Payment Provider prototype (mock Stripe API)\n        run: bun test poc/mercur-direct/test/numeria-direct-payment-provider.test.ts\n      - name: Declare independent prototype scope
+      - name: Test B3 Direct Payment Provider prototype (mock Stripe API)
+        run: bun test poc/mercur-direct/test/numeria-direct-payment-provider.test.ts
+      - name: Declare independent prototype scope
         if: always()
         run: |
           echo 'Payout Provider is NOT registered into Mercur or production.' >> "$GITHUB_STEP_SUMMARY"
