@@ -129,9 +129,9 @@ jobs:
           docker exec "$PGCONT" psql -U postgres -d mercur -Atc 'select 1' | grep -qx '1'
           docker exec "$PGCONT" psql -U postgres -d postgres -Atc "select rolcreatedb from pg_roles where rolname='postgres'" | grep -qx t
           docker exec "$REDCONT" redis-cli ping | grep -qx PONG
-      - name: Run pinned webhook HTTP integration test
+      - name: Run pinned webhook and split-order payments HTTP integration
         working-directory: mercur/integration-tests
-        run: bun run test:integration:http -- --runTestsByPath http/payment/payment-webhook-cart-completion.spec.ts
+        run: bun run test:integration:http -- --runTestsByPath http/payment/payment-webhook-cart-completion.spec.ts http/payment/split-order-payments.spec.ts
       - name: Postgres diagnosis after failure
         if: failure()
         run: |
