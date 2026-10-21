@@ -1,0 +1,31 @@
+{
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "workers/**/*.ts",
+    "vite.config.ts",
+    "react-router.config.ts",
+    ".react-router/types/**/*"
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node",
+      "vite/client",
+      "@cloudflare/workers-types"
+    ]
+  }
+}
