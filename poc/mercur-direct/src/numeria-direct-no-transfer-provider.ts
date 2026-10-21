@@ -4,7 +4,7 @@
 // IMPORTANT: Not registered into Mercur medusa-config or production.
 import Stripe from "stripe";
 import type {
-  IPayoutProvider,
+  IPayoutProvider, PayoutAccountStatus,
   CreatePayoutAccountInput, CreatePayoutAccountResponse,
   CreateOnboardingInput, CreateOnboardingResponse,
   CreatePayoutInput, CreatePayoutResponse,
@@ -40,12 +40,11 @@ export class NumeriaDirectNoTransferProvider implements IPayoutProvider {
     if (typeof country !== "string" || !/^[A-Z]{2}$/i.test(country)) throw new Error("COUNTRY_INVALID");
     if (typeof accountID !== "string" || !accountID) throw new Error("ACCOUNT_MAPPING_REQUIRED");
 
-    const {PayoutAccountStatus} = await import("@mercurjs/types");
     const acct = await this.stripe.accounts.create({
       type: "express", country: country.toUpperCase(),
       metadata: {account_id:accountID}
     },{idempotencyKey:input.context?.idempotency_key});
-    return {id:acct.id,status:PayoutAccountStatus.PENDING,
+    return {id:acct.id,status:"pending" as PayoutAccountStatus,
       data:{id:acct.id,charges_enabled:acct.charges_enabled,payouts_enabled:acct.payouts_enabled}};
   }
 
