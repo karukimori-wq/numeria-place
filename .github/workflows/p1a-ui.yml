@@ -1,0 +1,43 @@
+name: "P1-A UI checks (fixture only)"
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "workers/**"
+      - "tests/**"
+      - "package.json"
+      - "*.ts"
+      - "wrangler.jsonc"
+      - ".github/workflows/p1a-ui.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies without production credentials
+        run: npm install --no-audit --no-fund
+      - name: Test fixture invariants
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build SSR Workers bundle (no deploy)
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests and screenshots
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1a-browser-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
