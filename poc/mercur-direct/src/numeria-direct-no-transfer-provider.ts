@@ -71,7 +71,7 @@ export class NumeriaDirectNoTransferProvider implements IPayoutProvider {
   async getWebhookActionAndData(payload: PayoutWebhookActionInput): Promise<PayoutWebhookResult> {
     const signature = payload.headers["stripe-signature"];
     if (typeof signature !== "string") throw new Error("STRIPE_SIGNATURE_REQUIRED");
-    const event = this.stripe.webhooks.constructEvent(
+    const event = await this.stripe.webhooks.constructEventAsync(
       payload.rawData as Buffer | string,
       signature,
       this.secret
