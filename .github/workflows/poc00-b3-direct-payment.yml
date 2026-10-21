@@ -1,0 +1,27 @@
+name: PoC00-B3-02 Direct Payment Provider prototype
+on:
+  pull_request:
+    paths:
+      - 'poc/mercur-direct/**'
+      - '.github/workflows/poc00-b3-direct-payment.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  direct-payment-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.8'
+      - name: Install isolated Stripe SDK only (no API secrets)
+        run: npm install --prefix poc/mercur-direct --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0
+      - name: Test Direct Payment Provider (isolated mocked API)
+        run: bun test poc/mercur-direct/test/numeria-direct-payment-provider.test.ts
+      - name: Scope disclaimer
+        if: always()
+        run: |
+          echo 'Mocked Stripe calls only. Not registered in Mercur; no real charges, refunds or transfers.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No verified durable order/session mapping or webhook event deduplication yet.' >> "$GITHUB_STEP_SUMMARY"
