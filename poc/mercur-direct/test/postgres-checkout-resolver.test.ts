@@ -4,6 +4,7 @@ import {readFileSync} from "node:fs";
 import {Pool} from "pg";
 import type Stripe from "stripe";
 import {makePostgresCheckoutResolver} from "../src/postgres-checkout-resolver";
+import {makePostgresPaymentIntentRegistry} from "../src/postgres-payment-intent-registry";
 import {NumeriaDirectPaymentProvider} from "../src/numeria-direct-payment-provider";
 
 if (!process.env.DATABASE_URL?.startsWith("postgresql://"))
@@ -11,22 +12,24 @@ if (!process.env.DATABASE_URL?.startsWith("postgresql://"))
 const db=new Pool({connectionString:process.env.DATABASE_URL,max:8});
 const schema=readFileSync(new URL("../db/b3-checkout-schema.sql",import.meta.url),"utf8");
 const resolve=makePostgresCheckoutResolver(db);
+const registry=makePostgresPaymentIntentRegistry(db);
 const nowFuture="2099-01-01T00:00:00Z";
 const calls:any[]=[];
 const stripe={
   paymentIntents:{
     create:async (p:any,o:any)=>{
       calls.push({params:p,options:o});
-      return {id:"pi_b3_123",status:"requires_capture",amount:p.amount,currency:p.currency,
+      return {id:p.metadata.session_id==="ps_orderA"?"pi_A123":"pi_B123",status:"requires_capture",amount:p.amount,currency:p.currency,
         client_secret:"secret_test",metadata:p.metadata};
     },
   }
 } as unknown as Stripe;
 const provider=new NumeriaDirectPaymentProvider({},{
-  webhookSecret:"whsec_fake_no_external",stripeClient:stripe,resolveCheckout:resolve
+  webhookSecret:"whsec_fake_no_external",stripeClient:stripe,resolveCheckout:resolve,
+  paymentIntentRegistry:registry
 });
 beforeAll(async()=>{
- await db.query("DROP TABLE IF EXISTS np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers CASCADE");
+ await db.query("DROP TABLE IF EXISTS np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers CASCADE");
  await db.query(schema);
  await db.query(`INSERT INTO np_poc_b3_sellers VALUES
    ('sellerA','active','verified'),('sellerB','active','verified'),('sellerC','suspended','pending')`);
@@ -51,11 +54,14 @@ test("real PostgreSQL resolves seller and amount, ignores hostile client account
  calls.length=0;
  const result=await provider.initiatePayment({amount:2800,currency_code:"jpy",
    data:{session_id:"ps_orderA",accountId:"acct_B123456",application_fee_amount:0}});
- expect(result.id).toBe("pi_b3_123");
+ expect(result.id).toBe("pi_A123");
  expect(calls).toHaveLength(1);
  expect(calls[0].options.stripeAccount).toBe("acct_A123456");
  expect(calls[0].params.application_fee_amount).toBe(280);
  expect(calls[0].params.metadata.np_order_id).toBe("orderA");
+ const rows=await db.query("SELECT intent_id,account_id FROM np_poc_b3_payment_intents WHERE session_id=$1",["ps_orderA"]);
+ expect(rows.rows[0].intent_id).toBe("pi_A123");
+ expect(rows.rows[0].account_id).toBe("acct_A123456");
 });
 test("another seller resolves to their own account",async()=>{
  calls.length=0;
@@ -128,4 +134,28 @@ test("existing paid order can still be resolved after seller suspended and sessi
 });
 test("invalid session identifier rejected before DB lookup",async()=>{
  await expect(resolve("ps_' OR 1=1 --")).rejects.toThrow("NP_SESSION_INVALID");
+});
+
+test("different PaymentIntent cannot replace durable session binding",async()=>{
+ const t=await resolve("ps_orderA","existing");
+ await expect(registry.bind({
+  sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
+  accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:"pi_FORGED123"
+ })).rejects.toThrow("NP_INTENT_BINDING_MISMATCH");
+});
+test("wrong seller cannot verify a bound intent",async()=>{
+ const t=await resolve("ps_orderA","existing");
+ await expect(registry.verify({
+  sessionId:t.sessionId,orderId:t.orderId,sellerId:"sellerB",
+  accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:"pi_A123"
+ })).rejects.toThrow("NP_INTENT_BINDING_MISMATCH");
+});
+test("repeat same session has one durable PaymentIntent and one Stripe idempotency key",async()=>{
+ calls.length=0;
+ await Promise.all(Array.from({length:8},()=>provider.initiatePayment({
+  amount:2800,currency_code:"jpy",data:{session_id:"ps_orderA"}
+ })));
+ expect(new Set(calls.map(x=>x.options.idempotencyKey)).size).toBe(1);
+ const rows=await db.query("SELECT count(*)::integer n FROM np_poc_b3_payment_intents WHERE session_id=$1",["ps_orderA"]);
+ expect(rows.rows[0].n).toBe(1);
 });
