@@ -2,7 +2,7 @@ import {test,expect} from "bun:test";
 import Stripe from "stripe";
 import {NumeriaDirectPaymentProvider} from "../src/numeria-direct-payment-provider";
 const account="acct_123456789", session="ps_123", order="order_123", seller="seller_123";
-const trusted={orderId:order,sellerId:seller,accountId:account,amount:1500,fee:150,currency:"jpy" as const,sessionId:session};
+const trusted={orderId:order,sellerId:seller,accountId:account,amount:1500,fee:150,currency:"jpy" as const,sessionId:session,orderState:"pending" as const};
 const intent={id:"pi_123456789",status:"requires_capture",amount:1500,currency:"jpy",
   client_secret:"pi_secret",metadata:{session_id:session,np_order_id:order,np_seller_id:seller}};
 function setup(change:any={}) {
@@ -84,4 +84,11 @@ test("webhook requires valid signature and connected account",async()=>{
  await expect(provider.getWebhookActionAndData({provider:"pp_numeria-direct_default",payload:{
   rawData:Buffer.from(forged),headers:{"stripe-signature":forgedSig},data:payload
  }})).rejects.toThrow("NP_WEBHOOK_ORDER_MISMATCH");
+});
+
+test("reject new charge after order paid",async()=>{
+ const {provider,calls}=setup({resolved:{...trusted,orderState:"paid"}});
+ await expect(provider.initiatePayment({amount:1500,currency_code:"jpy",data:{session_id:session}}))
+   .rejects.toThrow("NP_ORDER_ALREADY_FINALIZED");
+ expect(calls).toHaveLength(0);
 });
