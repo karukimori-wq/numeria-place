@@ -11,26 +11,28 @@ const expected="9fe557067193e0ad4dd3b7fd37e212f0b352ab3c";
 if(sha!==expected)throw Error("NP_MERCUR_UPSTREAM_SHA_MISMATCH: "+sha);
 const path=join(root,"packages/core/src/modules/payout/services/payout-module-service.ts");
 const source=readFileSync(path,"utf8");
-const marker=`    async createPayouts(
+const startMarker=`    async createPayouts(
         input: CreatePayoutDTO,
         @MedusaContext() sharedContext?: Context<EntityManager>
+    ): Promise<PayoutDTO> {`;
+const endMarker=`    @InjectTransactionManager()
+    protected async createPayouts_(`;
+const a=source.indexOf(startMarker);
+const b=source.indexOf(endMarker,a);
+if(a<0||b<0||source.indexOf(startMarker,a+1)>=0)throw Error("NP_MERCUR_GUARD_ANCHOR_CHANGED");
+const guarded=source.slice(0,a)+`    async createPayouts(
+        _input: CreatePayoutDTO,
+        @MedusaContext() _sharedContext?: Context<EntityManager>
     ): Promise<PayoutDTO> {
-        const { payout, payoutAccount } = await this.createPayouts_(input, sharedContext)`;
-const replacement=`    async createPayouts(
-        input: CreatePayoutDTO,
-        @MedusaContext() sharedContext?: Context<EntityManager>
-    ): Promise<PayoutDTO> {
-        // NP Direct Charge seller already receives the connected-account funds.
-        // Disable ALL legacy payout creation at the module boundary, including
-        // workflow, admin, vendor, background jobs and direct service calls.
-        // Reconciliation MUST be read-only and separate from this method.
+        // NP Direct Charge seller receives funds via Stripe connected account.
+        // This module boundary blocks legacy Transfer for workflows, API, jobs
+        // and direct service invocations. Never mark a fictional payout PAID.
         throw new MedusaError(
             MedusaError.Types.NOT_ALLOWED,
             "NP_DIRECT_CHARGE_MERCUR_TRANSFER_FORBIDDEN"
         )
-        const { payout, payoutAccount } = await this.createPayouts_(input, sharedContext)`;
-if(!source.includes(marker))throw Error("NP_MERCUR_GUARD_ANCHOR_CHANGED");
-if(source.split(marker).length!==2)throw Error("NP_MERCUR_GUARD_AMBIGUOUS");
-const guarded=source.replace(marker,replacement);
+    }
+
+`+source.slice(b);
 writeFileSync(path,guarded);
 console.log("B3-05a guard applied to pinned Mercur payout module. Legacy createPayouts is fail-closed.");
