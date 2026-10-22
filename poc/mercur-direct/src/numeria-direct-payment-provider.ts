@@ -183,11 +183,11 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
     return this.cancelPayment(input);
   }
-  async getWebhookActionAndData(payload: ProviderWebhookPayload): Promise<WebhookActionResult> {
-    const signature=payload.payload?.headers?.["stripe-signature"];
+  async getWebhookActionAndData(payload: ProviderWebhookPayload["payload"]): Promise<WebhookActionResult> {
+    const signature=payload.headers?.["stripe-signature"];
     if (typeof signature!=="string") throw new Error("NP_WEBHOOK_SIGNATURE_REQUIRED");
     const event=await this.stripe.webhooks.constructEventAsync(
-      payload.payload.rawData as string|Buffer,signature,this.options.webhookSecret
+      payload.rawData as string|Buffer,signature,this.options.webhookSecret
     );
     if (!event.type.startsWith("payment_intent.")) return {action:"not_supported"};
     const p=event.data.object as Stripe.PaymentIntent;

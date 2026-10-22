@@ -83,15 +83,15 @@ test("webhook requires valid signature and connected account",async()=>{
   data:{object:{...intent,status:"succeeded"}}};
  const raw=JSON.stringify(payload);
  const sig=await client.webhooks.generateTestHeaderStringAsync({payload:raw,secret:"whsec_local"});
- const ok=await provider.getWebhookActionAndData({provider:"pp_numeria-direct_default",payload:{
+ const ok=await provider.getWebhookActionAndData({
   rawData:Buffer.from(raw),headers:{"stripe-signature":sig},data:payload
- }});
+ });
  expect(ok.action).toBe("captured");
  const forged=JSON.stringify({...payload,account:"acct_EVIL"});
  const forgedSig=await client.webhooks.generateTestHeaderStringAsync({payload:forged,secret:"whsec_local"});
- await expect(provider.getWebhookActionAndData({provider:"pp_numeria-direct_default",payload:{
+ await expect(provider.getWebhookActionAndData({
   rawData:Buffer.from(forged),headers:{"stripe-signature":forgedSig},data:payload
- }})).rejects.toThrow("NP_WEBHOOK_ORDER_MISMATCH");
+ })).rejects.toThrow("NP_WEBHOOK_ORDER_MISMATCH");
 });
 
 test("reject new charge after order paid",async()=>{
