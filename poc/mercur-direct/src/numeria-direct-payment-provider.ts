@@ -15,8 +15,9 @@ import type {
 export type VerifiedCheckout = {
   orderId: string; sellerId: string; accountId: string;
   amount: number; fee: number; currency: "jpy"; sessionId: string;
+  orderState: "pending" | "paid";
 };
-export type TrustedCheckoutResolver = (sessionId: string) => Promise<VerifiedCheckout>;
+export type TrustedCheckoutResolver = (sessionId: string, operation?: "initiate" | "existing") => Promise<VerifiedCheckout>;
 type Options = {
   apiKey?: string; webhookSecret: string;
   resolveCheckout: TrustedCheckoutResolver;
@@ -50,13 +51,17 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   }
   getIdentifier() { return NumeriaDirectPaymentProvider.identifier; }
 
-  private async trusted(sessionId: string, amount?: unknown, currency?: unknown) {
+  private async trusted(sessionId: string, amount?: unknown, currency?: unknown,
+    operation: "initiate" | "existing" = "existing") {
     if (typeof sessionId !== "string" || !sessionId) throw new Error("NP_SESSION_REQUIRED");
-    const t = await this.options.resolveCheckout(sessionId);
+    const t = await this.options.resolveCheckout(sessionId, operation);
     if (!t || t.sessionId !== sessionId || !accountPattern.test(t.accountId) ||
         !t.orderId || !t.sellerId || t.currency !== "jpy" ||
+        !["pending","paid"].includes(t.orderState) ||
         !validAmount(t.amount) || !Number.isSafeInteger(t.fee) ||
         t.fee < 0 || t.fee > t.amount) throw new Error("NP_UNTRUSTED_CHECKOUT");
+    if (operation === "initiate" && t.orderState !== "pending")
+      throw new Error("NP_ORDER_ALREADY_FINALIZED");
     if (amount !== undefined && Number(amount) !== t.amount) throw new Error("NP_AMOUNT_MISMATCH");
     if (currency !== undefined && currency !== t.currency) throw new Error("NP_CURRENCY_MISMATCH");
     return t;
@@ -80,7 +85,7 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
     // Session ID must be issued by Medusa, not copied from untrusted client data.
     const sessionId = input.data?.session_id;
-    const t = await this.trusted(sessionId as string, input.amount, input.currency_code);
+    const t = await this.trusted(sessionId as string, input.amount, input.currency_code, "initiate");
     const p = await this.stripe.paymentIntents.create({
       amount: t.amount, currency: t.currency,
       application_fee_amount: t.fee,
