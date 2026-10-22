@@ -20,6 +20,7 @@ function setup(change:any={}) {
  } as unknown as Stripe;
  const provider=new NumeriaDirectPaymentProvider({},{
   webhookSecret:"whsec_local",stripeClient:client,
+  paymentIntentRegistry:{bind:async()=>{},verify:async()=>{}},
   resolveCheckout:async (_session)=>change.resolved ?? trusted
  });
  return {provider,calls,client,p};
