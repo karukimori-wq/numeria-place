@@ -9,7 +9,7 @@ const safeInt = (v: unknown) => {
   return Number.isSafeInteger(n) ? n : NaN;
 };
 export function makePostgresCheckoutResolver(db: DB) {
-  return async (sessionId: string): Promise<VerifiedCheckout> => {
+  return async (sessionId: string, operation: "initiate" | "existing" = "existing"): Promise<VerifiedCheckout> => {
     if (typeof sessionId !== "string" || !/^ps_[A-Za-z0-9_-]{3,128}$/.test(sessionId))
       throw new Error("NP_SESSION_INVALID");
     const q = await db.query(`
@@ -29,12 +29,13 @@ export function makePostgresCheckoutResolver(db: DB) {
     `, [sessionId]);
     if (q.rowCount !== 1) throw new Error("NP_SESSION_NOT_FOUND");
     const r = q.rows[0];
-    if (r.seller_status !== "active" || r.kyc_status !== "verified" ||
-        r.charges_enabled !== true || r.account_status !== "active" ||
-        r.listing_status !== "published")
+    if (operation === "initiate" && (r.seller_status !== "active" ||
+        r.kyc_status !== "verified" || r.charges_enabled !== true ||
+        r.account_status !== "active" || r.listing_status !== "published"))
       throw new Error("NP_SELLER_NOT_ELIGIBLE");
     if (!["pending","paid"].includes(r.state)) throw new Error("NP_ORDER_NOT_ELIGIBLE");
-    if (!(r.expires_at instanceof Date) || r.expires_at.getTime() <= Date.now())
+    if (operation === "initiate" && (!(r.expires_at instanceof Date) ||
+        r.expires_at.getTime() <= Date.now()))
       throw new Error("NP_SESSION_EXPIRED");
     const amount = safeInt(r.amount_minor), fee = safeInt(r.fee_minor);
     if (!(amount > 0) || !(fee >= 0 && fee <= amount) || r.currency !== "jpy")
