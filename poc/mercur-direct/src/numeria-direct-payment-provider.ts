@@ -18,9 +18,15 @@ export type VerifiedCheckout = {
   orderState: "pending" | "paid";
 };
 export type TrustedCheckoutResolver = (sessionId: string, operation?: "initiate" | "existing") => Promise<VerifiedCheckout>;
+export type PaymentIntentBinding = Pick<VerifiedCheckout,"sessionId"|"orderId"|"sellerId"|"accountId"|"amount"|"currency"> & {intentId:string};
+export type PaymentIntentRegistry = {
+  bind(binding:PaymentIntentBinding):Promise<void>;
+  verify(binding:PaymentIntentBinding):Promise<void>;
+};
 type Options = {
   apiKey?: string; webhookSecret: string;
   resolveCheckout: TrustedCheckoutResolver;
+  paymentIntentRegistry: PaymentIntentRegistry;
   // Mock client ONLY in isolated tests; production injects secret via environment.
   stripeClient?: Stripe;
 };
@@ -43,7 +49,9 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   private stripe: Stripe;
   private options: Options;
   constructor(_cradle: Record<string, unknown>, options: Options) {
-    if (!options.webhookSecret || typeof options.resolveCheckout !== "function")
+    if (!options.webhookSecret || typeof options.resolveCheckout !== "function" ||
+        typeof options.paymentIntentRegistry?.bind !== "function" ||
+        typeof options.paymentIntentRegistry?.verify !== "function")
       throw new Error("NP_DIRECT_CONFIG_INCOMPLETE");
     if (!options.apiKey && !options.stripeClient) throw new Error("NP_DIRECT_KEY_REQUIRED");
     this.options = options;
@@ -73,6 +81,10 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
         typeof sessionId !== "string") throw new Error("NP_PAYMENT_REFERENCE_INVALID");
     const t = await this.trusted(sessionId);
     if (t.accountId !== account) throw new Error("NP_CONNECT_ACCOUNT_MISMATCH");
+    await this.options.paymentIntentRegistry.verify({
+      sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
+      accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:id
+    });
     const intent = await this.stripe.paymentIntents.retrieve(id, {stripeAccount: t.accountId});
     if (intent.metadata?.session_id !== t.sessionId ||
         intent.metadata?.np_order_id !== t.orderId ||
@@ -92,6 +104,15 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
       automatic_payment_methods: {enabled: true},
       metadata: {session_id: t.sessionId, np_order_id: t.orderId, np_seller_id: t.sellerId},
     }, {stripeAccount: t.accountId, idempotencyKey: `np:direct:${t.sessionId}`});
+    if (!intentPattern.test(p.id) || p.amount!==t.amount || p.currency!==t.currency ||
+        p.metadata?.session_id!==t.sessionId ||
+        p.metadata?.np_order_id!==t.orderId ||
+        p.metadata?.np_seller_id!==t.sellerId)
+      throw new Error("NP_CREATED_INTENT_MISMATCH");
+    await this.options.paymentIntentRegistry.bind({
+      sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
+      accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:p.id
+    });
     return {id: p.id, status: status(p), data: exposed(p,t.accountId)};
   }
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
