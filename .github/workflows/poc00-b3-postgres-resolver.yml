@@ -1,4 +1,4 @@
-name: PoC00-B3-03 PostgreSQL trusted checkout resolver
+name: PoC00-B3-04a PostgreSQL checkout crash recovery
 on:
   pull_request:
     paths:
@@ -34,9 +34,11 @@ jobs:
       - name: Install isolated PostgreSQL driver and Stripe SDK (no credentials)
         run: npm install --prefix poc/mercur-direct --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0 pg@8.16.3
       - name: Test real PostgreSQL seller isolation and Direct Payment Provider mock
-        run: bun test poc/mercur-direct/test/postgres-checkout-resolver.test.ts
+        run: |
+          bun test poc/mercur-direct/test/postgres-checkout-resolver.test.ts
+          bun test poc/mercur-direct/test/checkout-recovery.test.ts
       - name: Declare B3-03 limits
         if: always()
         run: |
           echo 'Real disposable PostgreSQL constraints and reads; mocked Stripe API.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'No live Stripe KYC refresh, persistent PaymentIntent binding or Mercur runtime registration.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No real Stripe API calls, live KYC, webhook-inbox integration or Mercur runtime registration.' >> "$GITHUB_STEP_SUMMARY"
