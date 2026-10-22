@@ -89,8 +89,13 @@ jobs:
         working-directory: mercur
         run: bun run build
       - name: Install isolated Stripe SDK for NP test provider (offline calls only)
-        working-directory: mercur/integration-tests
-        run: bun add stripe@23.0.0 pg@8.16.3 @types/pg@8.15.5 typescript@5.9.3 --exact
+        run: |
+          npm install --prefix "$RUNNER_TEMP/np-runtime-deps" --ignore-scripts --no-audit --no-fund stripe@23.0.0 pg@8.16.3 @types/pg@8.15.5 typescript@5.9.3
+          mkdir -p mercur/integration-tests/node_modules/@types
+          for package in stripe pg typescript @types/pg; do
+            rm -rf "mercur/integration-tests/node_modules/$package"
+            ln -s "$RUNNER_TEMP/np-runtime-deps/node_modules/$package" "mercur/integration-tests/node_modules/$package"
+          done
       - name: Typecheck registered NP Payment provider against pinned Medusa 2.21.2
         working-directory: mercur/integration-tests
         run: node node_modules/typescript/bin/tsc -p tsconfig.np.json
