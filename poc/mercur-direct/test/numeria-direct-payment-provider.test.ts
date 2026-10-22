@@ -21,6 +21,13 @@ function setup(change:any={}) {
  const provider=new NumeriaDirectPaymentProvider({},{
   webhookSecret:"whsec_local",stripeClient:client,
   paymentIntentRegistry:{bind:async()=>{},verify:async()=>{}},
+  checkoutAttempts:{
+    acquire:async()=>change.checkoutKind==="existing"?
+      {kind:"existing" as const,intentId:intent.id}:
+      {kind:"create" as const,leaseToken:"00000000-0000-4000-8000-000000000001",
+       idempotencyKey:"np:direct:"+session},
+    finish:async()=>{}
+  },
   resolveCheckout:async (_session)=>change.resolved ?? trusted
  });
  return {provider,calls,client,p};
@@ -92,4 +99,11 @@ test("reject new charge after order paid",async()=>{
  await expect(provider.initiatePayment({amount:1500,currency_code:"jpy",data:{session_id:session}}))
    .rejects.toThrow("NP_ORDER_ALREADY_FINALIZED");
  expect(calls).toHaveLength(0);
+});
+
+test("existing bound intent is retrieved without a new Stripe charge",async()=>{
+ const {provider,calls}=setup({checkoutKind:"existing"});
+ const r=await provider.initiatePayment({amount:1500,currency_code:"jpy",data:{session_id:session}});
+ expect(r.id).toBe(intent.id);
+ expect(calls.map(c=>c[0])).toEqual(["retrieve"]);
 });
