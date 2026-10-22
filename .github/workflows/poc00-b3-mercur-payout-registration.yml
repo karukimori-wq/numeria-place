@@ -84,6 +84,9 @@ jobs:
       - name: Build pinned Mercur workspace
         working-directory: mercur
         run: bun run build
+      - name: Install isolated Stripe SDK for NP test provider (offline calls only)
+        working-directory: mercur/integration-tests
+        run: bun add stripe@23.0.0 --exact
       - name: Inject NP provider into disposable integration config only
         run: node np/poc/mercur-integration/scripts/install-overlay.mjs mercur np
       - name: Fail-closed audit of pinned payout source and NP provider registration
