@@ -94,7 +94,7 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
       sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
       accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:id
     });
-    const intent = await this.stripe.paymentIntents.retrieve(id, {stripeAccount: t.accountId});
+    const intent = await this.stripe.paymentIntents.retrieve(id, {}, {stripeAccount: t.accountId});
     if (intent.metadata?.session_id !== t.sessionId ||
         intent.metadata?.np_order_id !== t.orderId ||
         intent.metadata?.np_seller_id !== t.sellerId ||
@@ -109,7 +109,7 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
     // Acquire a durable reservation BEFORE contacting Stripe.
     const lease=await this.options.checkoutAttempts.acquire(t);
     if (lease.kind==="existing") {
-      const p=await this.stripe.paymentIntents.retrieve(lease.intentId,{stripeAccount:t.accountId});
+      const p=await this.stripe.paymentIntents.retrieve(lease.intentId,{},{stripeAccount:t.accountId});
       if (p.id!==lease.intentId || p.amount!==t.amount || p.currency!==t.currency ||
           p.metadata?.session_id!==t.sessionId || p.metadata?.np_order_id!==t.orderId ||
           p.metadata?.np_seller_id!==t.sellerId)

@@ -33,7 +33,7 @@ s=s.replace(anchor,anchor+`
 `);writeFileSync(route,s);
 // Typecheck only NP integration surface against installed pinned Medusa/Mercur.
 writeFileSync(join(root,"integration-tests/tsconfig.np.json"),JSON.stringify({compilerOptions:{
-  target:"ES2022",module:"commonjs",moduleResolution:"node",esModuleInterop:true,
+  target:"ES2022",module:"Node16",moduleResolution:"Node16",esModuleInterop:true,
   skipLibCheck:true,strict:true,noEmit:true,types:["node","jest"]
 },include:["src/providers/np-direct/**/*.ts","src/api/hooks/np-direct/route.ts","src/api/middlewares.ts"]},null,2));
 console.log("Installed pinned Direct Payment provider, dedicated HTTP endpoint, legacy webhook exclusion and pre-write payout guard (test app only).");

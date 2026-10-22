@@ -29,7 +29,7 @@ const client = {
       const p = {...params, id:"pi_"+params.metadata.session_id.replace(/[^a-zA-Z0-9]/g,""), status:"requires_capture",client_secret:"offline"};
       state.intents.set(p.id,p); return p;
     },
-    retrieve: async (id:string, opts:any) => {record("retrieve",opts); const p=state.intents.get(id); if(!p)throw new Error("UNKNOWN_OFFLINE_INTENT");return p;},
+    retrieve: async (id:string, _params:any, opts:any) => {record("retrieve",opts); const p=state.intents.get(id); if(!p)throw new Error("UNKNOWN_OFFLINE_INTENT");return p;},
     capture: async (id:string, _params:any, opts:any) => {record("capture",opts);const p={...state.intents.get(id),status:"succeeded"};state.intents.set(id,p);return p;},
     cancel: async (id:string, _params:any, opts:any) => {record("cancel",opts);return {...state.intents.get(id),status:"canceled"};},
   },

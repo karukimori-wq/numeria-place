@@ -11,7 +11,7 @@ function setup(change:any={}) {
  const client={
   paymentIntents:{
    create:async (params:any,opts:any)=>{calls.push(["create",params,opts]);return p;},
-   retrieve:async (id:any,opts:any)=>{calls.push(["retrieve",id,opts]);return p;},
+   retrieve:async (id:any,_params:any,opts:any)=>{calls.push(["retrieve",id,opts]);return p;},
    capture:async (id:any,params:any,opts:any)=>{calls.push(["capture",id,opts]);return {...p,status:"succeeded"};},
    cancel:async (id:any,params:any,opts:any)=>{calls.push(["cancel",id,opts]);return {...p,status:"canceled"};},
   },
