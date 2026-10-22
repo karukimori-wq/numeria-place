@@ -1,4 +1,4 @@
-name: PoC00-B3-04a PostgreSQL checkout crash recovery
+name: PoC00-B3-04b PostgreSQL signed webhook integration
 on:
   pull_request:
     paths:
@@ -37,8 +37,9 @@ jobs:
         run: |
           bun test poc/mercur-direct/test/postgres-checkout-resolver.test.ts
           bun test poc/mercur-direct/test/checkout-recovery.test.ts
-      - name: Declare B3-03 limits
+          bun test poc/mercur-direct/test/postgres-signed-webhook.test.ts
+      - name: Declare B3-04b limits
         if: always()
         run: |
           echo 'Real disposable PostgreSQL constraints and reads; mocked Stripe API.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'No real Stripe API calls, live KYC, webhook-inbox integration or Mercur runtime registration.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No real Stripe API calls, live KYC, Mercur runtime webhook registration or production migrations.' >> "$GITHUB_STEP_SUMMARY"
