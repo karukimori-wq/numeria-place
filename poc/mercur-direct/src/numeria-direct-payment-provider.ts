@@ -23,10 +23,17 @@ export type PaymentIntentRegistry = {
   bind(binding:PaymentIntentBinding):Promise<void>;
   verify(binding:PaymentIntentBinding):Promise<void>;
 };
+export type CheckoutAttemptCoordinator = {
+  acquire(t:VerifiedCheckout):Promise<
+    {kind:"create";leaseToken:string;idempotencyKey:string}|
+    {kind:"existing";intentId:string}>;
+  finish(t:VerifiedCheckout,leaseToken:string,intentId:string):Promise<void>;
+};
 type Options = {
   apiKey?: string; webhookSecret: string;
   resolveCheckout: TrustedCheckoutResolver;
   paymentIntentRegistry: PaymentIntentRegistry;
+  checkoutAttempts: CheckoutAttemptCoordinator;
   // Mock client ONLY in isolated tests; production injects secret via environment.
   stripeClient?: Stripe;
 };
@@ -51,7 +58,9 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   constructor(_cradle: Record<string, unknown>, options: Options) {
     if (!options.webhookSecret || typeof options.resolveCheckout !== "function" ||
         typeof options.paymentIntentRegistry?.bind !== "function" ||
-        typeof options.paymentIntentRegistry?.verify !== "function")
+        typeof options.paymentIntentRegistry?.verify !== "function" ||
+        typeof options.checkoutAttempts?.acquire !== "function" ||
+        typeof options.checkoutAttempts?.finish !== "function")
       throw new Error("NP_DIRECT_CONFIG_INCOMPLETE");
     if (!options.apiKey && !options.stripeClient) throw new Error("NP_DIRECT_KEY_REQUIRED");
     this.options = options;
@@ -95,25 +104,35 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   }
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
-    // Session ID must be issued by Medusa, not copied from untrusted client data.
-    const sessionId = input.data?.session_id;
-    const t = await this.trusted(sessionId as string, input.amount, input.currency_code, "initiate");
-    const p = await this.stripe.paymentIntents.create({
-      amount: t.amount, currency: t.currency,
-      application_fee_amount: t.fee,
-      automatic_payment_methods: {enabled: true},
-      metadata: {session_id: t.sessionId, np_order_id: t.orderId, np_seller_id: t.sellerId},
-    }, {stripeAccount: t.accountId, idempotencyKey: `np:direct:${t.sessionId}`});
+    const sessionId=input.data?.session_id;
+    const t=await this.trusted(sessionId as string,input.amount,input.currency_code,"initiate");
+    // Acquire a durable reservation BEFORE contacting Stripe.
+    const lease=await this.options.checkoutAttempts.acquire(t);
+    if (lease.kind==="existing") {
+      const p=await this.stripe.paymentIntents.retrieve(lease.intentId,{stripeAccount:t.accountId});
+      if (p.id!==lease.intentId || p.amount!==t.amount || p.currency!==t.currency ||
+          p.metadata?.session_id!==t.sessionId || p.metadata?.np_order_id!==t.orderId ||
+          p.metadata?.np_seller_id!==t.sellerId)
+        throw new Error("NP_EXISTING_INTENT_MISMATCH");
+      await this.options.paymentIntentRegistry.verify({
+        sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
+        accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:p.id
+      });
+      return {id:p.id,status:status(p),data:exposed(p,t.accountId)};
+    }
+    // Ambiguous failures keep their lease. Retrying within 12h reuses the key.
+    const p=await this.stripe.paymentIntents.create({
+      amount:t.amount,currency:t.currency,application_fee_amount:t.fee,
+      automatic_payment_methods:{enabled:true},
+      metadata:{session_id:t.sessionId,np_order_id:t.orderId,np_seller_id:t.sellerId}
+    },{stripeAccount:t.accountId,idempotencyKey:lease.idempotencyKey});
     if (!intentPattern.test(p.id) || p.amount!==t.amount || p.currency!==t.currency ||
-        p.metadata?.session_id!==t.sessionId ||
-        p.metadata?.np_order_id!==t.orderId ||
+        p.metadata?.session_id!==t.sessionId || p.metadata?.np_order_id!==t.orderId ||
         p.metadata?.np_seller_id!==t.sellerId)
       throw new Error("NP_CREATED_INTENT_MISMATCH");
-    await this.options.paymentIntentRegistry.bind({
-      sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
-      accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:p.id
-    });
-    return {id: p.id, status: status(p), data: exposed(p,t.accountId)};
+    // Atomic DB commit: registry binding and attempt completion.
+    await this.options.checkoutAttempts.finish(t,lease.leaseToken,p.id);
+    return {id:p.id,status:status(p),data:exposed(p,t.accountId)};
   }
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     const {intent,t} = await this.retrieve(input.data);
