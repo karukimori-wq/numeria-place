@@ -116,6 +116,12 @@ test("wrong amount and seller metadata are rejected without inbox side effects",
   }}))).rejects.toThrow("NP_WEBHOOK_BINDING_MISMATCH");
   expect(await count("np_poc_b3_webhook_inbox")).toBe(before);
 });
+test("succeeded event with non-succeeded intent state cannot grant access",async()=>{
+  const before=await count("np_poc_b3_webhook_inbox");
+  await expect(send(events("A","evt_false_success",undefined,{status:"processing"})))
+    .rejects.toThrow("NP_WEBHOOK_INTENT_STATUS_MISMATCH");
+  expect(await count("np_poc_b3_webhook_inbox")).toBe(before);
+});
 test("unknown PaymentIntent cannot complete order or enter inbox",async()=>{
   const before=await count("np_poc_b3_webhook_inbox");
   await expect(send(events("A","evt_unknown_intent",undefined,{id:"pi_FORGED123"})))
