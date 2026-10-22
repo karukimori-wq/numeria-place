@@ -30,7 +30,7 @@ jobs:
           node np/poc/mercur-direct/scripts/audit-mercur-direct-gates.cjs mercur
           git -C mercur diff --check
           git -C mercur diff -- packages/core/src/modules/payout/services/payout-module-service.ts
-      - name: Negative control: source audit MUST fail if guard removed
+      - name: 'Negative control: source audit MUST fail if guard removed'
         run: |
           cp mercur/packages/core/src/modules/payout/services/payout-module-service.ts /tmp/np-payout-patched.ts
           python3 - <<'PY'
