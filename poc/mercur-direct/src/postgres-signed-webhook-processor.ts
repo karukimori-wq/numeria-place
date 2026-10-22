@@ -36,6 +36,10 @@ export function makeSignedPaymentIntentWebhookProcessor(cfg:Config) {
        !safe(oid,ident)||!safe(seller,ident)||
        !Number.isSafeInteger(p.amount)||p.amount<=0||p.currency!=="jpy")
       throw new Error("NP_WEBHOOK_INVALID_PAYLOAD");
+    // Event type and PaymentIntent state must agree; do not grant paid
+    // entitlement from a malformed succeeded notification.
+    if(event.type==="payment_intent.succeeded" && p.status!=="succeeded")
+      throw new Error("NP_WEBHOOK_INTENT_STATUS_MISMATCH");
     const hash=createHash("sha256").update(rawBody).digest("hex");
     const db=await cfg.db.connect();
     try{
