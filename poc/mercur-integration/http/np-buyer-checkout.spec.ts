@@ -1,12 +1,23 @@
 // B3-05c-1: real authenticated HTTP + actual Medusa createPaymentSession.
 // Authority rows are trusted fixture projections, not production ingestion.
 import {medusaIntegrationTestRunner} from "@medusajs/test-utils";
-import {Modules} from "@medusajs/framework/utils";
+import {Modules,ContainerRegistrationKeys,generateJwtToken} from "@medusajs/framework/utils";
 import type {ICartModuleService,IPaymentModuleService} from "@medusajs/framework/types";
-import {createCustomerUser} from "../../helpers/create-customer-user";
+
 import {database,state,close} from "../../src/providers/np-direct/runtime";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
+async function createCustomerUser(container:any,options:{email:string}) {
+  const customer=await container.resolve(Modules.CUSTOMER).createCustomers({email:options.email});
+  const identity=await container.resolve(Modules.AUTH).createAuthIdentities({
+    provider_identities:[{provider:"emailpass",entity_id:options.email,provider_metadata:{}}],
+    app_metadata:{customer_id:customer.id}
+  });
+  const config=container.resolve(ContainerRegistrationKeys.CONFIG_MODULE).projectConfig.http;
+  const token=generateJwtToken({actor_id:customer.id,actor_type:"customer",auth_identity_id:identity.id},
+    {secret:config.jwtSecret,expiresIn:"1d",jwtOptions:config.jwtOptions});
+  return {customer,headers:{headers:{authorization:"Bearer "+token}}};
+}
 const tables="np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
 jest.setTimeout(180000);
 medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{
@@ -68,6 +79,7 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{
     expect((await post()).status).toBe(409);
     await cartModule.updateCarts(cart.id,{customer_id:buyer.customer.id});
     const current=await cartModule.retrieveCart(cart.id,{relations:["items"]});
+    if(!current.items?.length)throw Error("NP_FIXTURE_LINE_MISSING");
     await cartModule.updateLineItems(current.items[0].id,{unit_price:1});
     expect((await post()).status).toBe(409);
     expect(state.calls).toHaveLength(0);
@@ -77,7 +89,7 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{
     expect(Number((await payment.retrievePaymentCollection(collection.id)).amount)).toBe(1);
     expect((await post()).status).toBe(409);
     await payment.updatePaymentCollections(collection.id,{amount:2800});
-    await cartModule.createLineItems({cart_id:cart.id,title:"second listing",quantity:1,unit_price:1});
+    await cartModule.addLineItems({cart_id:cart.id,title:"second listing",quantity:1,unit_price:1});
     expect((await post()).status).toBe(409);
     expect(state.calls).toHaveLength(0);
   });
