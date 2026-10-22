@@ -178,6 +178,10 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
     if (event.account!==t.accountId || p.metadata?.np_order_id!==t.orderId ||
         p.metadata?.np_seller_id!==t.sellerId || p.amount!==t.amount ||
         p.currency!==t.currency) throw new Error("NP_WEBHOOK_ORDER_MISMATCH");
+    await this.options.paymentIntentRegistry.verify({
+      sessionId:t.sessionId,orderId:t.orderId,sellerId:t.sellerId,
+      accountId:t.accountId,amount:t.amount,currency:t.currency,intentId:p.id
+    });
     const action=event.type==="payment_intent.succeeded"?"captured":
       event.type==="payment_intent.amount_capturable_updated"?"authorized":
       event.type==="payment_intent.payment_failed"?"failed":"not_supported";
