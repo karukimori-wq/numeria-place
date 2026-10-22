@@ -86,6 +86,8 @@ jobs:
         run: bun run build
       - name: Inject NP provider into disposable integration config only
         run: node np/poc/mercur-integration/scripts/install-overlay.mjs mercur np
+      - name: Fail-closed audit of pinned payout source and NP provider registration
+        run: node np/poc/mercur-integration/scripts/audit-pinned-mercur.mjs mercur
       - name: Test actual Mercur payout service hard stop
         working-directory: mercur/integration-tests
         run: bun run test:integration:http -- --runTestsByPath http/np/np-no-transfer-payout.spec.ts
