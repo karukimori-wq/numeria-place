@@ -3,6 +3,7 @@
 import {createHash,randomBytes} from "node:crypto";
 import {AsyncLocalStorage} from "node:async_hooks";
 import {database} from "./runtime";
+import {assertSourceVersion} from "./source-checkout";
 export const providerId="pp_numeria-direct_np-direct";
 const checkoutScope=new AsyncLocalStorage<{proof:string;order:string;collection:string}>();
 const hash=(s:string)=>createHash("sha256").update(s).digest("hex");
@@ -31,18 +32,19 @@ export async function bindMedusaSession(input:any,sessionService:any) {
     return a.np_session as string;
   }catch(e){await db.query("ROLLBACK");throw e;}finally{db.release();}
 }
-export async function startBuyerCheckout(actor:string,order:string,cartService:any,payment:any) {
+export async function startBuyerCheckout(actor:string,order:string,cartService:any,payment:any,scope?:any) {
   if(!actor)throw Error("NP_BUYER_REQUIRED");
   const db=database();
   const q=await db.query(`SELECT a.*,o.listing_id,o.amount_minor,o.currency,o.state
     FROM np_poc_b305_checkout_authority a JOIN np_poc_b3_orders o USING(order_id)
     WHERE a.order_id=$1 AND a.buyer_id=$2`,[order,actor]);
   const a=q.rows[0];if(!a)throw Error("NP_CHECKOUT_NOT_FOUND");
+  if(a.snapshot_hash)await assertSourceVersion(actor,a,scope);
   const cart=await cartService.retrieveCart(a.cart_id,{relations:["items","items.tax_lines","items.adjustments","shipping_methods"]});
   const item=cart.items?.[0];
   if(cart.customer_id!==actor || cart.completed_at || cart.currency_code!==a.currency ||
       cart.items?.length!==1 || Number(item?.quantity)!==1 ||
-      item?.metadata?.np_listing_id!==a.listing_id || Number(item?.unit_price)!==Number(a.amount_minor) ||
+      (!a.snapshot_hash && item?.metadata?.np_listing_id!==a.listing_id) || Number(item?.unit_price)!==Number(a.amount_minor) ||
       cart.shipping_methods?.length || item?.tax_lines?.length || item?.adjustments?.length)
     throw Error("NP_CART_SNAPSHOT_MISMATCH");
   const collection=await payment.retrievePaymentCollection(a.payment_collection_id);

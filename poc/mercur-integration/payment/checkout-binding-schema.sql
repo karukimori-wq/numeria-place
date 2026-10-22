@@ -6,5 +6,6 @@ CREATE TABLE np_poc_b305_checkout_authority (
  payment_collection_id text NOT NULL UNIQUE,
  medusa_session_id text UNIQUE,
  proof_hash text CHECK(proof_hash IS NULL OR proof_hash ~ '^[0-9a-f]{64}$'),
+ snapshot_hash text CHECK(snapshot_hash IS NULL OR snapshot_hash ~ '^[0-9a-f]{64}$'),
  lease_until timestamptz
 );

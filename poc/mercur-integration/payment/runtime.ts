@@ -7,7 +7,7 @@ import { makePostgresCheckoutAttemptCoordinator } from "./core/postgres-checkout
 import { makeSignedPaymentIntentWebhookProcessor } from "./core/postgres-signed-webhook-processor";
 let db: Pool;
 export const secret = "whsec_B305_OFFLINE_SYNTHETIC_ONLY";
-export const state = { failCommit: false, failResponse:false, calls: [] as {method:string;account:string}[], intents: new Map<string, any>() };
+export const state = { failCommit: false, failResponse:false, failProjection:false, calls: [] as {method:string;account:string}[], intents: new Map<string, any>() };
 export function database() {
   if (!db) {
     const url = process.env.NP_POC_DATABASE_URL;

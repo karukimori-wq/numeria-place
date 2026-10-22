@@ -6,7 +6,7 @@ export const POST=async(req:AuthenticatedMedusaRequest,res:MedusaResponse)=>{
   try {
     if(Object.keys(req.body??{}).length){res.status(400).json({code:"NP_SERVER_CONTROLLED_CHECKOUT"});return;}
     const s=await startBuyerCheckout(req.auth_context?.actor_id,req.params.order_id,
-      req.scope.resolve(Modules.CART),req.scope.resolve(Modules.PAYMENT));
+      req.scope.resolve(Modules.CART),req.scope.resolve(Modules.PAYMENT),req.scope);
     if(state.failResponse)throw Error("NP_INJECTED_RESPONSE_LOSS");
     res.status(200).json({payment_session_id:s.id,status:s.status});
   }catch(error){
