@@ -12,7 +12,7 @@ const db=new Pool({connectionString:process.env.DATABASE_URL,max:18});
 const stripe=new Stripe("sk_test_offline_fixture_only");
 const secret="whsec_B304b_fake_local";
 let failBeforeCommit=false;
-const process=makeSignedPaymentIntentWebhookProcessor({
+const processWebhook=makeSignedPaymentIntentWebhookProcessor({
   db,stripe,webhookSecret:secret,
   beforeCommit:async()=>{if(failBeforeCommit)throw new Error("SIMULATED_TX_FAILURE");}
 });
@@ -38,7 +38,7 @@ const signed=async (evt:any)=>{
 };
 const send=async(evt:any)=>{
   const x=await signed(evt);
-  return process(x.raw,x.sig);
+  return processWebhook(x.raw,x.sig);
 };
 const count=async(table:string)=>{
   const r=await db.query("SELECT count(*)::int n FROM "+table);
@@ -72,7 +72,7 @@ afterAll(async()=>{await db.query("DROP TABLE IF EXISTS "+tables+" CASCADE");awa
 
 test("16 concurrent identical signed callbacks -> one paid transition and one NS/outbox",async()=>{
   const x=await signed(events("A","evt_A_001"));
-  const result=await Promise.all(Array.from({length:16},()=>process(x.raw,x.sig)));
+  const result=await Promise.all(Array.from({length:16},()=>processWebhook(x.raw,x.sig)));
   expect(result.filter(x=>x==="paid")).toHaveLength(1);
   expect(result.filter(x=>x==="duplicate_event")).toHaveLength(15);
   expect(await count("np_poc_b3_webhook_inbox")).toBe(1);
@@ -126,7 +126,7 @@ test("forged signature fails before DB mutation",async()=>{
   const evt=events("A","evt_forged");
   const x=await signed(evt);
   const before=await count("np_poc_b3_webhook_inbox");
-  await expect(process(x.raw.replace("2800","9999"),x.sig)).rejects.toThrow();
+  await expect(processWebhook(x.raw.replace("2800","9999"),x.sig)).rejects.toThrow();
   expect(await count("np_poc_b3_webhook_inbox")).toBe(before);
 });
 test("reused event ID with changed signed payload is rejected",async()=>{
