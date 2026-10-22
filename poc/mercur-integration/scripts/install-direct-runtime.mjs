@@ -31,9 +31,12 @@ s=s.replace(anchor,anchor+`
       return
     }
 `);writeFileSync(route,s);
+const buyerApi=join(root,"integration-tests/src/api/np-checkout/[order_id]");mkdirSync(buyerApi,{recursive:true});
+cpSync(join(np,"poc/mercur-integration/api/buyer-route.ts"),join(buyerApi,"route.ts"));
+cpSync(join(np,"poc/mercur-integration/http/np-buyer-checkout.spec.ts"),join(root,"integration-tests/http/np/np-buyer-checkout.spec.ts"));
 // Typecheck only NP integration surface against installed pinned Medusa/Mercur.
 writeFileSync(join(root,"integration-tests/tsconfig.np.json"),JSON.stringify({compilerOptions:{
   target:"ES2022",module:"Node16",moduleResolution:"Node16",esModuleInterop:true,
   skipLibCheck:true,strict:true,noEmit:true,types:["node","jest"]
-},include:["src/providers/np-direct/**/*.ts","src/api/hooks/np-direct/route.ts","src/api/middlewares.ts"]},null,2));
+},include:["src/providers/np-direct/**/*.ts","src/api/hooks/np-direct/route.ts","src/api/np-checkout/**/*.ts","src/api/middlewares.ts"]},null,2));
 console.log("Installed pinned Direct Payment provider, dedicated HTTP endpoint, legacy webhook exclusion and pre-write payout guard (test app only).");
