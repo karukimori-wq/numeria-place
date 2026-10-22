@@ -77,6 +77,9 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     await expect(pg("cart_line_item").where({id:item.id}).update({unit_price:1})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
     const s=await pg("np_poc_cart_seals").first();
     await expect(payment.updatePaymentCollections(s.snapshot.collectionId,{amount:1})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    await expect(pg("payment_collection").where({id:s.snapshot.collectionId}).update({id:"paycol_changed"})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    await expect(pg("payment_collection").where({id:s.snapshot.collectionId}).update({raw_amount:JSON.stringify({value:"1",precision:20})})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    await expect(pg("cart_line_item_adjustment").insert({id:"adj_np_denied",item_id:item.id,amount:1,code:"denied"})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
     await expect(database().query("UPDATE np_poc_b3_orders SET amount_minor=1")).rejects.toThrow("NP_ORDER_SNAPSHOT_IMMUTABLE");
   });
   it("blocks remote offer/cart-payment link removal after seal",async()=>{
@@ -95,6 +98,23 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const next=await post();expect(next.data).toEqual(first.data);
     expect((await database().query("SELECT count(*)::int n FROM np_poc_b3_orders")).rows[0].n).toBe(1);
     expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+  });
+  it("changed live catalog price rejects reuse rather than repricing a sealed order",async()=>{
+    expect((await post()).status).toBe(200);
+    await pg("price").where({id:price.id}).update({amount:2900,raw_amount:JSON.stringify({value:"2900",precision:20})});
+    expect((await post()).status).toBe(409);
+    expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+    expect(Number((await database().query("SELECT amount_minor FROM np_poc_b3_orders")).rows[0].amount_minor)).toBe(2800);
+  });
+  it("8 concurrent preparations produce one source order, collection and intent",async()=>{
+    const results=await Promise.all(Array.from({length:8},()=>post()));
+    expect(results.some(r=>r.status===200)).toBe(true);
+    expect(results.every(r=>[200,409].includes(r.status))).toBe(true);
+    expect((await database().query("SELECT count(*)::int n FROM np_poc_b3_orders")).rows[0].n).toBe(1);
+    expect((await pg("np_poc_cart_seals").select())).toHaveLength(1);
+    expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+    const {data}=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"cart_payment_collection",fields:["payment_collection_id"],filters:{cart_id:cart.id}});
+    expect(data).toHaveLength(1);
   });
   it("source-backed real session and signed HTTP confirm NP paid/Intake/Outbox once",async()=>{
     const r=await post();expect(r.status).toBe(200);

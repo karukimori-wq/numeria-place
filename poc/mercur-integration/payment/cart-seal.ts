@@ -9,6 +9,7 @@ export async function installCartSeal(pg:any) {
       IF TG_OP<>'INSERT' THEN oldj=to_jsonb(OLD); END IF;
       IF TG_OP<>'DELETE' THEN newj=to_jsonb(NEW); END IF;
       IF TG_ARGV[0]='collection' AND TG_OP='UPDATE' AND
+         oldj->'id' IS NOT DISTINCT FROM newj->'id' AND
          oldj->'amount' IS NOT DISTINCT FROM newj->'amount' AND
          oldj->'currency_code' IS NOT DISTINCT FROM newj->'currency_code' AND
          oldj->'raw_amount' IS NOT DISTINCT FROM newj->'raw_amount' AND
