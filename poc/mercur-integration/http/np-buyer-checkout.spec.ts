@@ -2,6 +2,7 @@
 // Authority rows are trusted fixture projections, not production ingestion.
 import {medusaIntegrationTestRunner} from "@medusajs/test-utils";
 import {Modules} from "@medusajs/framework/utils";
+import type {ICartModuleService,IPaymentModuleService} from "@medusajs/framework/types";
 import {createCustomerUser} from "../../helpers/create-customer-user";
 import {database,state,close} from "../../src/providers/np-direct/runtime";
 import {readFileSync} from "node:fs";
@@ -9,7 +10,7 @@ import {join} from "node:path";
 const tables="np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
 jest.setTimeout(180000);
 medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{
-  let buyer:any,other:any,cart:any,collection:any,payment:any,cartModule:any;
+  let buyer:any,other:any,cart:any,collection:any,payment:IPaymentModuleService,cartModule:ICartModuleService;
   const post=(who:any=buyer,body:any={})=>api.post("/np-checkout/orderA",body,{headers:who?.headers?.headers??{},validateStatus:()=>true});
   beforeEach(async()=>{
     const db=database();state.calls.length=0;state.intents.clear();state.failResponse=false;
@@ -48,6 +49,7 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{
     expect(session.payment_collection_id).toBe(collection.id);
     expect(session.data.session_id).toBe("ps_A123");
     expect(session.data.np_medusa_session_id).toBe(session.id);
+    expect(session.context).toEqual({});
     const row=(await database().query("SELECT * FROM np_poc_b305_checkout_authority")).rows[0];
     expect(row.medusa_session_id).toBe(session.id);
     expect(row.proof_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -61,18 +63,20 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{
     expect(state.calls).toHaveLength(0);
   });
   it("changed cart owner or line price cannot authorize checkout",async()=>{
-    await cartModule.updateCarts({id:cart.id,customer_id:other.customer.id});
+    await cartModule.updateCarts(cart.id,{customer_id:other.customer.id});
+    expect((await cartModule.retrieveCart(cart.id)).customer_id).toBe(other.customer.id);
     expect((await post()).status).toBe(409);
-    await cartModule.updateCarts({id:cart.id,customer_id:buyer.customer.id});
+    await cartModule.updateCarts(cart.id,{customer_id:buyer.customer.id});
     const current=await cartModule.retrieveCart(cart.id,{relations:["items"]});
-    await cartModule.updateLineItems({id:current.items[0].id,unit_price:1});
+    await cartModule.updateLineItems(current.items[0].id,{unit_price:1});
     expect((await post()).status).toBe(409);
     expect(state.calls).toHaveLength(0);
   });
   it("multiple cart items or mismatched payment collection total are denied",async()=>{
-    await payment.updatePaymentCollections({id:collection.id,amount:1});
+    await payment.updatePaymentCollections(collection.id,{amount:1});
+    expect(Number((await payment.retrievePaymentCollection(collection.id)).amount)).toBe(1);
     expect((await post()).status).toBe(409);
-    await payment.updatePaymentCollections({id:collection.id,amount:2800});
+    await payment.updatePaymentCollections(collection.id,{amount:2800});
     await cartModule.createLineItems({cart_id:cart.id,title:"second listing",quantity:1,unit_price:1});
     expect((await post()).status).toBe(409);
     expect(state.calls).toHaveLength(0);
