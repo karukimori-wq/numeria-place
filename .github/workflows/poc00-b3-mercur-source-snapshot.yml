@@ -1,4 +1,4 @@
-name: PoC00-B3-05c-2a real Mercur source snapshot and DB seal (offline)
+name: PoC00-B3-05c-2b sealed Mercur completion and replay (offline)
 on:
   pull_request:
     paths:

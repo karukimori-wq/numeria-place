@@ -4,6 +4,7 @@ import {Modules,ContainerRegistrationKeys,generateJwtToken} from "@medusajs/fram
 import type {ICartModuleService,IPaymentModuleService} from "@medusajs/framework/types";
 import {MercurModules,SellerStatus,PayoutAccountStatus} from "@mercurjs/types";
 import {database,state,secret,close} from "../../src/providers/np-direct/runtime";
+import {reconcilePaidOrder,reconcilePaidOrders} from "../../src/providers/np-direct/completion";
 import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
@@ -24,7 +25,7 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
   beforeEach(async()=>{
     c=getContainer();pg=c.resolve(ContainerRegistrationKeys.PG_CONNECTION);link=c.resolve(ContainerRegistrationKeys.LINK);
     cartModule=c.resolve(Modules.CART);payment=c.resolve(Modules.PAYMENT);
-    state.calls.length=0;state.intents.clear();state.failProjection=false;
+    state.calls.length=0;state.intents.clear();state.failProjection=false;state.failCompletion=false;state.failCompletionAck=false;
     await database().query("DROP TABLE IF EXISTS "+tables+" CASCADE");
     for(const name of ["b3-checkout-schema.sql","b3-webhook-schema.sql"])
       await database().query(readFileSync(join(process.cwd(),"src/providers/np-direct/db",name),"utf8"));
@@ -116,13 +117,54 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const {data}=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"cart_payment_collection",fields:["payment_collection_id"],filters:{cart_id:cart.id}});
     expect(data).toHaveLength(1);
   });
+  async function signedPaid(eventId:string){
+    const r=await post();expect(r.status).toBe(200);
+    const s=await payment.retrievePaymentSession(r.data.payment_session_id);const pi=state.intents.get(s.data.id as string);
+    state.intents.set(pi.id,{...pi,status:"succeeded"});
+    const payload=JSON.stringify({id:eventId,type:"payment_intent.succeeded",account:"acct_Source123",data:{object:{...pi,status:"succeeded"}}});
+    const sdk=new Stripe("sk_test_OFFLINE");const signature=await sdk.webhooks.generateTestHeaderStringAsync({payload,secret});
+    return {orderId:r.data.order_id,send:()=>api.post("/hooks/np-direct",payload,{headers:{"content-type":"application/json","stripe-signature":signature},validateStatus:()=>true})};
+  }
+  it("unpaid source order cannot authorize standard completion",async()=>{
+    const r=await post();expect(r.status).toBe(200);
+    await expect(reconcilePaidOrder(r.data.order_id,c)).rejects.toThrow("NP_COMPLETION_REQUIRES_PAID");
+    await expect(cartModule.updateCarts(cart.id,{completed_at:new Date()})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    expect(await pg("np_poc_completion").select()).toHaveLength(0);
+  });
+  it("replays durable paid state after failure before Mercur completion",async()=>{
+    const event=await signedPaid("evt_before_completion");state.failCompletion=true;
+    try{expect((await event.send()).status).toBe(503);}finally{state.failCompletion=false;}
+    expect((await database().query("SELECT state FROM np_poc_b3_orders")).rows[0].state).toBe("paid");
+    expect((await cartModule.retrieveCart(cart.id)).completed_at).toBeNull();
+    await reconcilePaidOrders(c);
+    expect((await pg("np_poc_completion").first()).state).toBe("completed");
+    expect((await event.send()).status).toBe(200);
+    expect((await database().query("SELECT count(*)::int n FROM np_poc_b3_ns_intake")).rows[0].n).toBe(1);
+    expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+  });
+  it("lost acknowledgement after standard completion retries without another order",async()=>{
+    const event=await signedPaid("evt_after_completion");state.failCompletionAck=true;
+    try{expect((await event.send()).status).toBe(503);}finally{state.failCompletionAck=false;}
+    expect((await cartModule.retrieveCart(cart.id)).completed_at).toBeTruthy();
+    expect((await event.send()).status).toBe(200);
+    const completed=await pg("np_poc_completion").first();expect(completed.state).toBe("completed");
+    const q=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:cart.id}});
+    expect(q.data).toHaveLength(1);expect(q.data[0].order.id).toBe(completed.medusa_order_id);
+    await expect(cartModule.updateLineItems(item.id,{quantity:2})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    await expect(cartModule.updateCarts(cart.id,{customer_id:other.customer.id})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    expect(state.calls.every(x=>x.account==="acct_Source123")).toBe(true);
+    expect(state.calls.some(x=>x.method==="capture")).toBe(false);
+  });
   it("source-backed real session and signed HTTP confirm NP paid/Intake/Outbox once",async()=>{
     const r=await post();expect(r.status).toBe(200);
     const s=await payment.retrievePaymentSession(r.data.payment_session_id);const pi=state.intents.get(s.data.id as string);
+    state.intents.set(pi.id,{...pi,status:"succeeded"});
     const payload=JSON.stringify({id:"evt_source_success",type:"payment_intent.succeeded",account:"acct_Source123",data:{object:{...pi,status:"succeeded"}}});
     const sdk=new Stripe("sk_test_OFFLINE");const sig=await sdk.webhooks.generateTestHeaderStringAsync({payload,secret});
     for(let i=0;i<2;i++)expect((await api.post("/hooks/np-direct",payload,{headers:{"content-type":"application/json","stripe-signature":sig},validateStatus:()=>true})).status).toBe(200);
     expect((await database().query("SELECT state FROM np_poc_b3_orders")).rows[0].state).toBe("paid");
+    expect((await cartModule.retrieveCart(cart.id)).completed_at).toBeTruthy();
+    expect((await pg("np_poc_completion").first()).state).toBe("completed");
     expect((await database().query("SELECT count(*)::int n FROM np_poc_b3_ns_intake")).rows[0].n).toBe(1);
     expect((await database().query("SELECT count(*)::int n FROM np_poc_b3_paid_outbox")).rows[0].n).toBe(1);
   });
