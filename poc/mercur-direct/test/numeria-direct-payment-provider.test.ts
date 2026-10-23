@@ -107,3 +107,15 @@ test("existing bound intent is retrieved without a new Stripe charge",async()=>{
  expect(r.id).toBe(intent.id);
  expect(calls.map(c=>c[0])).toEqual(["retrieve"]);
 });
+
+test("Medusa raw BigNumber refund amount is normalized on the original account",async()=>{
+ const {provider,calls}=setup({status:"succeeded"});
+ await provider.refundPayment({amount:{value:"500",precision:20},data:ref});
+ const c=calls.find(c=>c[0]==="refund");expect(c[1].amount).toBe(500);expect(c[2].stripeAccount).toBe(account);
+});
+test("malformed or unsafe raw refund amounts never reach Stripe refund",async()=>{
+ const {provider,calls}=setup({status:"succeeded"});
+ for(const value of ["", "NaN", "0", "-1", "1.5", "9007199254740992"])
+   await expect(provider.refundPayment({amount:{value,precision:20},data:ref})).rejects.toThrow("NP_REFUND_INVALID");
+ expect(calls.some(c=>c[0]==="refund")).toBe(false);
+});

@@ -39,6 +39,13 @@ type Options = {
 };
 const accountPattern = /^acct_[a-zA-Z0-9]+$/;
 const intentPattern = /^pi_[a-zA-Z0-9]+$/;
+// Medusa refundPaymentFromProvider_ passes refund.raw_amount, not a number.
+// Accept its numeric raw value explicitly; reject arbitrary object coercion.
+const amountNumber = (input:unknown):number => {
+  const value=input && typeof input==="object" && "value" in input
+    ? (input as {value:unknown}).value : input;
+  return typeof value==="number" || (typeof value==="string" && value.trim()!=="") ? Number(value) : NaN;
+};
 const validAmount = (n: number) => Number.isSafeInteger(n) && n > 0;
 const exposed = (p: Stripe.PaymentIntent, account: string) => ({
   id: p.id, status: p.status, currency: p.currency, amount: p.amount,
@@ -79,7 +86,7 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
         t.fee < 0 || t.fee > t.amount) throw new Error("NP_UNTRUSTED_CHECKOUT");
     if (operation === "initiate" && t.orderState !== "pending")
       throw new Error("NP_ORDER_ALREADY_FINALIZED");
-    if (amount !== undefined && Number(amount) !== t.amount) throw new Error("NP_AMOUNT_MISMATCH");
+    if (amount !== undefined && amountNumber(amount) !== t.amount) throw new Error("NP_AMOUNT_MISMATCH");
     if (currency !== undefined && currency !== t.currency) throw new Error("NP_CURRENCY_MISMATCH");
     return t;
   }
@@ -136,7 +143,7 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   }
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     const {intent,t} = await this.retrieve(input.data);
-    if (Number(input.amount) !== t.amount || input.currency_code !== t.currency)
+    if (amountNumber(input.amount) !== t.amount || input.currency_code !== t.currency)
       throw new Error("NP_PAYMENT_UPDATE_REQUIRES_NEW_SESSION");
     return {status: status(intent),data: exposed(intent,t.accountId)};
   }
@@ -158,7 +165,7 @@ export class NumeriaDirectPaymentProvider implements IPaymentProvider {
   }
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
     const {intent,t}=await this.retrieve(input.data);
-    const amount=Number(input.amount);
+    const amount=amountNumber(input.amount);
     if (intent.status !== "succeeded" || !validAmount(amount) || amount>t.amount)
       throw new Error("NP_REFUND_INVALID");
     // Fee refund behavior is subject to verified Connect account contract.
