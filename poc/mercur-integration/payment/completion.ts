@@ -29,6 +29,11 @@ export async function reconcilePaidOrder(orderId:string,scope:any) {
     const session=await payment.retrievePaymentSession(a.medusa_session_id);
     if(session.provider_id!==providerId||session.payment_collection_id!==a.payment_collection_id||session.data?.id!==a.intent_id||Number(session.amount)!==snap.amount||session.currency_code!==a.currency)
       throw Error("NP_COMPLETION_SESSION_MISMATCH");
+    // Use the same real DI provider as Medusa authorization: verify remote
+    // state and original Connect scope before issuing any completion permit.
+    const provider=payment.paymentProviderService_.retrieveProvider(providerId);
+    const remote=await provider.getPaymentStatus({data:session.data});
+    if(remote.status!=="captured")throw Error("NP_COMPLETION_PROVIDER_NOT_CAPTURED");
     const graph=scope.resolve(ContainerRegistrationKeys.QUERY);
     const cart=await scope.resolve(Modules.CART).retrieveCart(a.cart_id);
     if(!cart.completed_at){

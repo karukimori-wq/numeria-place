@@ -37,6 +37,8 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     [product]=await c.resolve(Modules.PRODUCT).createProducts([{title:"Source digital product",status:"published",variants:[{title:"Default",sku:"NP-SOURCE-VARIANT"}]}]);
     const profile=await c.resolve(Modules.FULFILLMENT).createShippingProfiles({name:"Digital fixture",type:"default"});
     [offer]=await c.resolve(MercurModules.OFFER).createOffers([{seller_id:seller.id,product_id:product.id,variant_id:product.variants[0].id,shipping_profile_id:profile.id,sku:"NP-SOURCE-OFFER",created_by:"fixture_server",manage_inventory:false,allow_backorder:true}]);
+    const inventory=await c.resolve(Modules.INVENTORY).createInventoryItems({sku:"NP-SOURCE-INVENTORY",requires_shipping:false});
+    await link.create({[MercurModules.OFFER]:{offer_id:offer.id},[Modules.INVENTORY]:{inventory_item_id:inventory.id},data:{required_quantity:1}});
     const priceSet=await c.resolve(Modules.PRICING).createPriceSets({prices:[{amount:2800,currency_code:"jpy"}]});price=priceSet.prices[0];
     await link.create({[MercurModules.OFFER]:{offer_id:offer.id},[Modules.PRICING]:{price_id:price.id}});
     cart=await cartModule.createCarts({currency_code:"jpy",customer_id:buyer.customer.id,items:[{title:"Actual variant",quantity:1,unit_price:2800,variant_id:product.variants[0].id,product_id:product.id,requires_shipping:false,metadata:{np_listing_id:"untrusted_ignore_me",seller_id:"untrusted_ignore_me"}}]});
