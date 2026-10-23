@@ -45,7 +45,6 @@ medusaIntegrationTestRunner({testSuite:({getContainer,api})=>{
   afterAll(async()=>{await database().query("DROP TABLE IF EXISTS "+tables+" CASCADE");await close();});
   it("registers real Payment Provider through Medusa DI; creates bound connected-account intent",async()=>{
     expect(provider.constructor.identifier).toBe("numeria-direct");
-    await db.query(readFileSync(join(process.cwd(),"src/providers/np-direct/checkout-binding-schema.sql"),"utf8"));
     for(const s of ["A","B","C"]){
       const result=await provider.initiatePayment({amount:2800,currency_code:"jpy",data:{session_id:"ps_"+s+"123",accountId:"acct_EVIL"}});
       refs[s]=result.data;
