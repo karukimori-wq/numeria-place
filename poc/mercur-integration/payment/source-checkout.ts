@@ -14,7 +14,7 @@ export async function sourceSnapshot(actor:string,cartId:string,scope:any,requir
   ]});
   const cart=data[0];if(!cart||cart.customer_id!==actor)throw Error("NP_CHECKOUT_NOT_FOUND");
   const item=cart.items?.[0],offer=item?.offer,seller=offer?.seller;
-  if(cart.completed_at || cart.currency_code!=="jpy" || cart.items?.length!==1 || Number(item.quantity)!==1 ||
+  if(cart.completed_at || cart.currency_code!=="jpy" || cart.items?.length!==1 || Number(item.quantity)!==1 || item.requires_shipping!==false ||
     cart.shipping_methods?.length || item.tax_lines?.length || item.adjustments?.length ||
     !offer || item.variant_id!==offer.variant_id || item.product_id!==offer.product_id ||
     offer.product?.status!=="published" || seller?.id!==offer.seller_id || seller?.status!=="open" ||

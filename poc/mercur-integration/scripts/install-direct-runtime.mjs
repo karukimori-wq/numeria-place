@@ -31,6 +31,16 @@ s=s.replace(anchor,anchor+`
       return
     }
 `);writeFileSync(route,s);
+// Pinned upstream forces every offer with a profile to physical shipping,
+// including explicit digital lines. Preserve false only for NP provider carts.
+const completionPath=join(root,"packages/core/src/workflows/cart/workflows/complete-cart-with-split-orders.ts");
+let completionSource=readFileSync(completionPath,"utf8");
+const shippingAnchor="const itemForLineItem = offerShippingProfileId\n";
+if(!completionSource.includes(shippingAnchor))throw Error("NP_COMPLETION_SHIPPING_ANCHOR_CHANGED");
+completionSource=completionSource.replace(shippingAnchor,`const itemForLineItem = offerShippingProfileId && !(item.requires_shipping === false &&
+                            cart.payment_collection?.payment_sessions?.some((s) => s.provider_id === 'pp_numeria-direct_np-direct'))
+`);
+writeFileSync(completionPath,completionSource);
 const buyerApi=join(root,"integration-tests/src/api/np-checkout/[order_id]");mkdirSync(buyerApi,{recursive:true});
 cpSync(join(np,"poc/mercur-integration/api/buyer-route.ts"),join(buyerApi,"route.ts"));
 cpSync(join(np,"poc/mercur-integration/http/np-buyer-checkout.spec.ts"),join(root,"integration-tests/http/np/np-buyer-checkout.spec.ts"));

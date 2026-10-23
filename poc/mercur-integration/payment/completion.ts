@@ -53,7 +53,7 @@ export async function reconcilePaidOrder(orderId:string,scope:any) {
     const orders=await graph.graph({entity:"order_cart",fields:["order.id","order.customer_id","order.currency_code","order.total","order.items.*","order.seller.id"],filters:{cart_id:a.cart_id}});
     const o=orders.data[0]?.order;
     const completed=await scope.resolve(Modules.CART).retrieveCart(a.cart_id);
-    if(groups.data.length!==1||orders.data.length!==1||!completed.completed_at||!o||o.customer_id!==a.buyer_id||o.seller?.id!==a.seller_id||o.currency_code!==a.currency||Number(o.total)!==snap.amount||o.items?.length!==1||Number(o.items[0].quantity)!==1||Number(o.items[0].unit_price)!==snap.amount)
+    if(groups.data.length!==1||orders.data.length!==1||!completed.completed_at||!o||o.customer_id!==a.buyer_id||o.seller?.id!==a.seller_id||o.currency_code!==a.currency||Number(o.total)!==snap.amount||o.items?.length!==1||Number(o.items[0].quantity)!==1||o.items[0].requires_shipping!==false||Number(o.items[0].unit_price)!==snap.amount)
       throw Error("NP_COMPLETION_RESULT_RECONCILE");
     await pg("np_poc_completion").where({cart_id:a.cart_id}).update({state:"completed",medusa_order_id:o.id,order_group_id:groups.data[0].id});
     return {orderId:o.id,orderGroupId:groups.data[0].id};

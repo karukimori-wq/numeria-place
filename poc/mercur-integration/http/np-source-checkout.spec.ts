@@ -127,6 +127,15 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const sdk=new Stripe("sk_test_OFFLINE");const signature=await sdk.webhooks.generateTestHeaderStringAsync({payload,secret});
     return {orderId:r.data.order_id,send:()=>api.post("/hooks/np-direct",payload,{headers:{"content-type":"application/json","stripe-signature":signature},validateStatus:()=>true})};
   }
+  it("signed paid evidence cannot complete while provider reports an uncaptured intent",async()=>{
+    const event=await signedPaid("evt_uncaptured_completion");
+    const pi=[...state.intents.values()][0];state.intents.set(pi.id,{...pi,status:"requires_capture"});
+    expect((await event.send()).status).toBe(503);
+    expect(await pg("np_poc_completion").select()).toHaveLength(0);
+    state.intents.set(pi.id,{...pi,status:"succeeded"});
+    expect((await event.send()).status).toBe(200);
+    expect(state.calls.some(x=>x.method==="capture")).toBe(false);
+  });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);
     await expect(reconcilePaidOrder(r.data.order_id,c)).rejects.toThrow("NP_COMPLETION_REQUIRES_PAID");
