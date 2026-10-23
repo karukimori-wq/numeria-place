@@ -180,7 +180,7 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
     expect(state.calls.some(x=>x.method==="capture")).toBe(false);
     const payouts=await c.resolve(MercurModules.PAYOUT).listPayouts({});expect(payouts).toHaveLength(0);
-    await expect(link.dismiss({[Modules.CART]:{cart_id:cart.id},[Modules.ORDER]:{order_id:ledger.medusa_order_id}})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+    await expect(link.dismiss({[Modules.ORDER]:{order_id:ledger.medusa_order_id},[Modules.CART]:{cart_id:cart.id}})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
   });
   it("source-backed real session and signed HTTP confirm NP paid/Intake/Outbox once",async()=>{
     const r=await post();expect(r.status).toBe(200);
