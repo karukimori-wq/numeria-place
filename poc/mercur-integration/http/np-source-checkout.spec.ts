@@ -155,6 +155,22 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     expect(state.calls.every(x=>x.account==="acct_Source123")).toBe(true);
     expect(state.calls.some(x=>x.method==="capture")).toBe(false);
   });
+  it("parallel signed replays produce one seller order and refund its original account",async()=>{
+    const event=await signedPaid("evt_parallel_completion");
+    const responses=await Promise.all(Array.from({length:4},()=>event.send()));
+    expect(responses.map(r=>r.status)).toEqual([200,200,200,200]);
+    const ledger=await pg("np_poc_completion").first();expect(ledger.state).toBe("completed");
+    const {data}=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"order",fields:["id","payment_collections.payments.*","payment_collections.payments.captures.*"],filters:{id:ledger.medusa_order_id}});
+    const paid=data[0].payment_collections[0].payments[0];
+    expect(paid.provider_id).toBe("pp_numeria-direct_np-direct");expect(paid.captures).toHaveLength(1);
+    expect(paid.data.np_connect_account).toBe("acct_Source123");
+    await payment.refundPayment({payment_id:paid.id,amount:2800});
+    expect(state.calls.filter(x=>x.method==="refund")).toEqual([{method:"refund",account:"acct_Source123"}]);
+    expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+    expect(state.calls.some(x=>x.method==="capture")).toBe(false);
+    const payouts=await c.resolve(MercurModules.PAYOUT).listPayouts({});expect(payouts).toHaveLength(0);
+    await expect(link.dismiss({[Modules.CART]:{cart_id:cart.id},[Modules.ORDER]:{order_id:ledger.medusa_order_id}})).rejects.toThrow("NP_SEALED_CART_IMMUTABLE");
+  });
   it("source-backed real session and signed HTTP confirm NP paid/Intake/Outbox once",async()=>{
     const r=await post();expect(r.status).toBe(200);
     const s=await payment.retrievePaymentSession(r.data.payment_session_id);const pi=state.intents.get(s.data.id as string);

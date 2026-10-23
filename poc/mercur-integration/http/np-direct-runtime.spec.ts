@@ -10,7 +10,7 @@ const sdk=new Stripe("sk_test_OFFLINE_ONLY");
 const providerId="pp_numeria-direct_np-direct";
 let provider:any;
 const refs:any={};
-const tables="np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
+const tables="np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
 jest.setTimeout(180000);
 medusaIntegrationTestRunner({testSuite:({getContainer,api})=>{
   const signed=async(s:string,id:string,overrides:any={})=>{
@@ -31,6 +31,7 @@ medusaIntegrationTestRunner({testSuite:({getContainer,api})=>{
     await db.query("DROP TABLE IF EXISTS "+tables+" CASCADE");
     for(const name of ["b3-checkout-schema.sql","b3-webhook-schema.sql"])
       await db.query(readFileSync(join(process.cwd(),"src/providers/np-direct/db",name),"utf8"));
+    await db.query(readFileSync(join(process.cwd(),"src/providers/np-direct/checkout-binding-schema.sql"),"utf8"));
     for(const s of ["A","B","C"]){
       await db.query("INSERT INTO np_poc_b3_sellers VALUES($1,'active','verified')",["seller"+s]);
       await db.query("INSERT INTO np_poc_b3_connect_accounts VALUES($1,$2,true,'active')",["seller"+s,"acct_"+s+"123456"]);
@@ -44,6 +45,7 @@ medusaIntegrationTestRunner({testSuite:({getContainer,api})=>{
   afterAll(async()=>{await database().query("DROP TABLE IF EXISTS "+tables+" CASCADE");await close();});
   it("registers real Payment Provider through Medusa DI; creates bound connected-account intent",async()=>{
     expect(provider.constructor.identifier).toBe("numeria-direct");
+    await db.query(readFileSync(join(process.cwd(),"src/providers/np-direct/checkout-binding-schema.sql"),"utf8"));
     for(const s of ["A","B","C"]){
       const result=await provider.initiatePayment({amount:2800,currency_code:"jpy",data:{session_id:"ps_"+s+"123",accountId:"acct_EVIL"}});
       refs[s]=result.data;

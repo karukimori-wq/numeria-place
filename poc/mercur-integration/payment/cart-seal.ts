@@ -29,7 +29,7 @@ export async function installCartSeal(pg:any) {
         PERFORM id FROM cart WHERE id=cid FOR UPDATE;
         IF EXISTS(SELECT 1 FROM np_poc_cart_seals WHERE cart_id=cid) THEN
           IF EXISTS(SELECT 1 FROM np_poc_completion p JOIN np_poc_cart_seals s USING(cart_id)
-            WHERE p.cart_id=cid AND p.snapshot_hash=s.snapshot_hash) THEN
+            WHERE p.cart_id=cid AND p.snapshot_hash=s.snapshot_hash AND p.state='pending') THEN
             -- Keep financial fields frozen; permit only completion timestamp
             -- (including workflow compensation), group and order-cart links.
             IF TG_ARGV[0]='root' AND TG_OP='UPDATE' AND

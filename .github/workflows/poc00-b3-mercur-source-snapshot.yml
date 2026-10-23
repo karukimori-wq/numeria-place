@@ -99,11 +99,11 @@ jobs:
       - name: Typecheck registered NP Payment provider against pinned Medusa 2.21.2
         working-directory: mercur/integration-tests
         run: node node_modules/typescript/bin/tsc -p tsconfig.np.json
-      - name: Test actual Mercur DI, synchronous signed HTTP, DB rollback and pre-write payout hard stop
+      - name: Test sealed source checkout, standard completion, replay, refund and no-Transfer
         working-directory: mercur/integration-tests
         run: bun run test:integration:http -- --runTestsByPath http/np/np-direct-runtime.spec.ts http/np/np-buyer-checkout.spec.ts http/np/np-source-checkout.spec.ts
       - name: Declare strict scope
         if: always()
         run: |
-          echo 'B3-05b: patched pinned Mercur build, NP typecheck, real DI/HTTP and isolated NP PostgreSQL tables.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Stripe transport is offline. NP paid tables are NOT Medusa cart/order completion; buyer auth, session issuance, real Stripe and NS delivery remain unverified.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'B3-05c-2b: pinned patched build/typecheck, real Mercur checkout/completion modules, NP ledger and signed HTTP replay.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Stripe transport is offline. Limited digital JPY fixtures only; real Stripe, production identity/DB policies and NS delivery remain unverified.' >> "$GITHUB_STEP_SUMMARY"
