@@ -191,6 +191,22 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     await runDueReconciliation(db,async()=>{});
     expect((await db.query("SELECT attempts,state FROM np_poc_retry_queue WHERE order_id='crashed'")).rows[0]).toEqual({attempts:2,state:"completed"});
   });
+  it("stops at persisted attempt ceiling while allowing success on the final attempt",async()=>{
+    const db=database();await installRetryQueue(db);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id,attempts,max_attempts) VALUES('fails',4,5),('succeeds',4,5)");
+    const run=jest.fn(async(id:string)=>{if(id==="fails")throw Error("private failure");});
+    await runDueReconciliation(db,run);await runDueReconciliation(db,run);expect(run).toHaveBeenCalledTimes(2);
+    const rows=(await db.query("SELECT order_id,state,attempts,stop_reason FROM np_poc_retry_queue ORDER BY order_id")).rows;
+    expect(rows).toEqual([{order_id:"fails",state:"review",attempts:5,stop_reason:"attempt_limit"},{order_id:"succeeds",state:"completed",attempts:5,stop_reason:null}]);
+    expect((await db.query("SELECT status FROM np_poc_retry_history WHERE order_id='fails'")).rows).toEqual([{status:"review"}]);
+  });
+  it("exhausted expired leases enter review but active leases and other orders remain safe",async()=>{
+    const db=database();await installRetryQueue(db);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id,state,attempts,max_attempts,lease_until) VALUES('expired','running',5,5,now()-interval '1 second'),('active','running',5,5,now()+interval '60 seconds'),('fresh','retry',0,5,NULL)");
+    const run=jest.fn(async()=>{});await runDueReconciliation(db,run);expect(run).toHaveBeenCalledTimes(1);
+    expect((await db.query("SELECT state,attempts,stop_reason FROM np_poc_retry_queue WHERE order_id='expired'")).rows[0]).toEqual({state:"review",attempts:5,stop_reason:"attempt_limit"});
+    expect((await db.query("SELECT state FROM np_poc_retry_queue WHERE order_id='active'")).rows[0].state).toBe("running");
+  });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);
     await expect(reconcilePaidOrder(r.data.order_id,c)).rejects.toThrow("NP_COMPLETION_REQUIRES_PAID");
