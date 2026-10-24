@@ -5,6 +5,7 @@ import type {ICartModuleService,IPaymentModuleService} from "@medusajs/framework
 import {MercurModules,SellerStatus,PayoutAccountStatus} from "@mercurjs/types";
 import {database,state,secret,close} from "../../src/providers/np-direct/runtime";
 import {reconcilePaidOrder,reconcilePaidOrders} from "../../src/providers/np-direct/completion";
+import {completionDisposition} from "../../src/providers/np-direct/completion-state";
 import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
@@ -135,6 +136,23 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     state.intents.set(pi.id,{...pi,status:"succeeded"});
     expect((await event.send()).status).toBe(200);
     expect(state.calls.some(x=>x.method==="capture")).toBe(false);
+  });
+  it("classifies all 18 persisted completion combinations conservatively",()=>{
+    for(let g=0;g<=2;g++)for(let o=0;o<=2;o++)for(const done of [false,true])
+      expect(completionDisposition(g,o,done)).toBe(g===0&&o===0&&!done?"start":g===1&&o===1&&done?"verify":"review");
+  });
+  it("persisted partial group stops replay before starting another workflow",async()=>{
+    const event=await signedPaid("evt_partial_group");state.failCompletion=true;
+    try{expect((await event.send()).status).toBe(503);}finally{state.failCompletion=false;}
+    await c.resolve(MercurModules.SELLER).createOrderGroups({cart_id:cart.id,customer_id:buyer.customer.id});
+    const engine=c.resolve(Modules.WORKFLOW_ENGINE);const run=jest.spyOn(engine,"run");
+    try{
+      for(let i=0;i<2;i++)await expect(reconcilePaidOrder(event.orderId,c)).rejects.toThrow("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");
+      expect(run).not.toHaveBeenCalled();
+    }finally{run.mockRestore();}
+    const q=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:cart.id}});
+    expect(q.data).toHaveLength(0);expect((await cartModule.retrieveCart(cart.id)).completed_at).toBeNull();
+    expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
   });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);

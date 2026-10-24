@@ -3,6 +3,7 @@
 import {ContainerRegistrationKeys,Modules} from "@medusajs/framework/utils";
 import {database,state} from "./runtime";
 import {sourceSnapshot} from "./source-checkout";
+import {completionDisposition} from "./completion-state";
 import {providerId} from "./checkout-binding";
 export async function reconcilePaidOrder(orderId:string,scope:any) {
   const pg=scope.resolve(ContainerRegistrationKeys.PG_CONNECTION);
@@ -45,8 +46,12 @@ export async function reconcilePaidOrder(orderId:string,scope:any) {
     const ledger=await pg("np_poc_completion").where({cart_id:a.cart_id}).first();
     if(ledger.order_id!==orderId||ledger.snapshot_hash!==a.snapshot_hash)throw Error("NP_COMPLETION_LEDGER_CONFLICT");
     if(state.failCompletion)throw Error("NP_INJECTED_BEFORE_COMPLETION");
+    const priorGroups=await graph.graph({entity:"order_group",fields:["id"],filters:{cart_id:a.cart_id}});
+    const priorOrders=await graph.graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:a.cart_id}});
+    const disposition=completionDisposition(priorGroups.data.length,priorOrders.data.length,!!cart.completed_at);
+    if(disposition==="review")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");
     const engine=scope.resolve(Modules.WORKFLOW_ENGINE);
-    const result=await engine.run("complete-cart-with-split-orders",{input:{cart_id:a.cart_id}});
+    const result=disposition==="start" ? await engine.run("complete-cart-with-split-orders",{input:{cart_id:a.cart_id}}) : {};
     if(result.errors?.length)throw Error("NP_MERCUR_COMPLETION_FAILED");
     if(state.failCompletionAck)throw Error("NP_INJECTED_AFTER_COMPLETION");
     const groups=await graph.graph({entity:"order_group",fields:["id","cart_id"],filters:{cart_id:a.cart_id}});
