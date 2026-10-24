@@ -1,3 +1,4 @@
+import {installRetryQueue,runDueReconciliation} from "../../src/providers/np-direct/reconciliation-retry";
 // Real Mercur modules/links, real DB seals; Stripe transport and Connect registry are offline fixtures.
 import {medusaIntegrationTestRunner} from "@medusajs/test-utils";
 import {Modules,ContainerRegistrationKeys,generateJwtToken} from "@medusajs/framework/utils";
@@ -11,7 +12,7 @@ import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import Stripe from "stripe";
-const tables="np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
+const tables="np_poc_retry_history,np_poc_retry_queue,np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
 jest.setTimeout(180000);
 medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur source-backed frozen checkout",()=>{
   let c:any,pg:any,cart:any,buyer:any,other:any,seller:any,offer:any,price:any,item:any,product:any,link:any;
@@ -169,6 +170,26 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const first=await reconcilePaidOrders(c);expect(first.results).toHaveLength(100);expect(first.nextCursor).toBe("batch_100");expect(first.results.every(x=>x.status==="retry")).toBe(true);
     const second=await reconcilePaidOrders(c,first.nextCursor!);expect(second.results).toEqual([{orderId:"batch_101",status:"retry"}]);expect(second.nextCursor).toBeNull();
     expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+  });
+  it("persists attempts, backoff and review without retrying before due time",async()=>{
+    const db=database();await installRetryQueue(db);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id) VALUES('a_bad'),('b_review'),('c_good')");
+    const run=jest.fn(async(id:string)=>{if(id==="a_bad")throw Error("private details");if(id==="b_review")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");});
+    expect(await runDueReconciliation(db,run)).toHaveLength(3);
+    expect(await runDueReconciliation(db,run)).toHaveLength(0);expect(run).toHaveBeenCalledTimes(3);
+    const row=(await db.query("SELECT *,next_at>now() AS waiting FROM np_poc_retry_queue WHERE order_id='a_bad'")).rows[0];expect(row.attempts).toBe(1);expect(row.waiting).toBe(true);
+    await db.query("UPDATE np_poc_retry_queue SET next_at=now()-interval '1 second' WHERE order_id='a_bad'");
+    await runDueReconciliation(db,async()=>{});
+    const history=(await db.query("SELECT status FROM np_poc_retry_history WHERE order_id='a_bad' ORDER BY attempt")).rows;
+    expect(history).toEqual([{status:"retry"},{status:"completed"}]);
+    expect(JSON.stringify((await db.query("SELECT * FROM np_poc_retry_history")).rows)).not.toContain("private");
+  });
+  it("claims concurrent work once and recovers expired running leases",async()=>{
+    const db=database();await installRetryQueue(db);await db.query("INSERT INTO np_poc_retry_queue(order_id) VALUES('single')");
+    let calls=0;await Promise.all(Array.from({length:4},()=>runDueReconciliation(db,async()=>{calls++;})));expect(calls).toBe(1);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id,state,attempts,lease_until) VALUES('crashed','running',1,now()-interval '1 second')");
+    await runDueReconciliation(db,async()=>{});
+    expect((await db.query("SELECT attempts,state FROM np_poc_retry_queue WHERE order_id='crashed'")).rows[0]).toEqual({attempts:2,state:"completed"});
   });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);

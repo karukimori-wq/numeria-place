@@ -1,3 +1,4 @@
+import {installRetryQueue,runDueReconciliation} from "./reconciliation-retry";
 // Offline integration app only. Replays trusted NP paid state into registered
 // Mercur workflow; never takes a browser order/session/account as authority.
 import {ContainerRegistrationKeys,Modules} from "@medusajs/framework/utils";
@@ -73,4 +74,12 @@ export async function reconcilePaidOrders(scope:any,afterOrderId="") {
     JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND a.snapshot_hash IS NOT NULL AND a.order_id>$1 ORDER BY a.order_id LIMIT 100`,[afterOrderId]);
   const results=await reconcileBatch(rows.map(row=>row.order_id),id=>reconcilePaidOrder(id,scope));
   return {results,nextCursor:rows.length===100?rows[rows.length-1].order_id:null};
+}
+
+// Re-scan from authoritative paid records; do not use a completed cursor as a watermark.
+export async function reconcileDuePaidOrders(scope:any) {
+  
+  const db=database();await installRetryQueue(db);
+  await db.query(`INSERT INTO np_poc_retry_queue(order_id) SELECT a.order_id FROM np_poc_b305_checkout_authority a JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND a.snapshot_hash IS NOT NULL ON CONFLICT DO NOTHING`);
+  return runDueReconciliation(db,id=>reconcilePaidOrder(id,scope));
 }
