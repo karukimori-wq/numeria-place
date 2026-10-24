@@ -1,3 +1,4 @@
+import {installRequeueAudit,requeueReviewedOrder} from "../../src/providers/np-direct/reconciliation-requeue";
 import {installRetryQueue,runDueReconciliation} from "../../src/providers/np-direct/reconciliation-retry";
 // Real Mercur modules/links, real DB seals; Stripe transport and Connect registry are offline fixtures.
 import {medusaIntegrationTestRunner} from "@medusajs/test-utils";
@@ -12,7 +13,7 @@ import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import Stripe from "stripe";
-const tables="np_poc_retry_history,np_poc_retry_queue,np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
+const tables="np_poc_retry_requeue_audit,np_poc_retry_operators,np_poc_retry_history,np_poc_retry_queue,np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
 jest.setTimeout(180000);
 medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur source-backed frozen checkout",()=>{
   let c:any,pg:any,cart:any,buyer:any,other:any,seller:any,offer:any,price:any,item:any,product:any,link:any;
@@ -206,6 +207,26 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const run=jest.fn(async()=>{});await runDueReconciliation(db,run);expect(run).toHaveBeenCalledTimes(1);
     expect((await db.query("SELECT state,attempts,stop_reason FROM np_poc_retry_queue WHERE order_id='expired'")).rows[0]).toEqual({state:"review",attempts:5,stop_reason:"attempt_limit"});
     expect((await db.query("SELECT state FROM np_poc_retry_queue WHERE order_id='active'")).rows[0].state).toBe("running");
+  });
+  it("requires a server-side operator grant and audits an idempotent bounded requeue",async()=>{
+    const db=database();await installRetryQueue(db);await installRequeueAudit(db);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id,state,attempts,stop_reason) VALUES('reviewed','review',5,'attempt_limit')");
+    const r={requestId:"00000000-0000-4000-8000-000000000001",actorId:"operator",orderId:"reviewed",expectedAttempts:5,budget:2,reason:"binding_verified" as const};
+    await expect(requeueReviewedOrder(db,r)).rejects.toThrow("NP_REQUEUE_FORBIDDEN");
+    await db.query("INSERT INTO np_poc_retry_operators VALUES('operator',true)");
+    const results=await Promise.all([requeueReviewedOrder(db,r),requeueReviewedOrder(db,r)]);expect(results.sort()).toEqual(["duplicate","requeued"]);
+    expect((await db.query("SELECT attempts,max_attempts,state FROM np_poc_retry_queue")).rows[0]).toEqual({attempts:5,max_attempts:7,state:"retry"});
+    expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(1);
+    await expect(requeueReviewedOrder(db,{...r,budget:3})).rejects.toThrow("NP_REQUEUE_REQUEST_CONFLICT");
+    await runDueReconciliation(db,async()=>{});
+    expect((await db.query("SELECT attempts,state FROM np_poc_retry_queue")).rows[0]).toEqual({attempts:6,state:"completed"});
+    await db.query("UPDATE np_poc_retry_operators SET enabled=false");await expect(requeueReviewedOrder(db,r)).rejects.toThrow("NP_REQUEUE_FORBIDDEN");
+  });
+  it("rejects stale attempts and partial completion without changing queue or audit",async()=>{
+    const db=database();await installRetryQueue(db);await installRequeueAudit(db);await db.query("INSERT INTO np_poc_retry_operators VALUES('operator',true)");
+    await db.query("INSERT INTO np_poc_retry_queue(order_id,state,attempts,stop_reason) VALUES('partial','review',3,'partial_completion'),('stale','review',5,'attempt_limit')");
+    for(const orderId of ["partial","stale"])await expect(requeueReviewedOrder(db,{requestId:"00000000-0000-4000-8000-000000000002",actorId:"operator",orderId,expectedAttempts:3,budget:1,reason:"binding_verified"})).rejects.toThrow("NP_REQUEUE_STATE_CONFLICT");
+    expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(0);
   });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);
