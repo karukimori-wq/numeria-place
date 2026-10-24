@@ -1,0 +1,29 @@
+name: PoC00-B2 Mercur Direct no-Transfer adapter safety
+on:
+  pull_request:
+    paths:
+      - 'poc/mercur-direct/**'
+      - '.github/workflows/poc00-mercur-direct-no-transfer.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  interface-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.8'
+      - name: Install pinned isolated Stripe SDK (no Stripe API key)
+        run: npm install --prefix poc/mercur-direct --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0
+      - name: Test payout adapter fail-closed + Stripe local signatures
+        run: bun test poc/mercur-direct/test/numeria-direct-no-transfer-provider.test.ts
+      - name: Test B3 Direct Payment Provider prototype (mock Stripe API)
+        run: bun test poc/mercur-direct/test/numeria-direct-payment-provider.test.ts
+      - name: Declare independent prototype scope
+        if: always()
+        run: |
+          echo 'Payout Provider is NOT registered into Mercur or production.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No connected-account charges or Transfers sent; only a stubbed Stripe account client is tested.' >> "$GITHUB_STEP_SUMMARY"

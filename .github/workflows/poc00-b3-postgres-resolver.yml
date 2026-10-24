@@ -1,0 +1,45 @@
+name: PoC00-B3-04b PostgreSQL signed webhook integration
+on:
+  pull_request:
+    paths:
+      - 'poc/mercur-direct/**'
+      - '.github/workflows/poc00-b3-postgres-resolver.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trusted-checkout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mercur
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mercur
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.8'
+      - name: Install isolated PostgreSQL driver and Stripe SDK (no credentials)
+        run: npm install --prefix poc/mercur-direct --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0 pg@8.16.3
+      - name: Test real PostgreSQL seller isolation and Direct Payment Provider mock
+        run: |
+          bun test poc/mercur-direct/test/postgres-checkout-resolver.test.ts
+          bun test poc/mercur-direct/test/checkout-recovery.test.ts
+          bun test poc/mercur-direct/test/postgres-signed-webhook.test.ts
+      - name: Declare B3-04b limits
+        if: always()
+        run: |
+          echo 'Real disposable PostgreSQL constraints and reads; mocked Stripe API.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No real Stripe API calls, live KYC, Mercur runtime webhook registration or production migrations.' >> "$GITHUB_STEP_SUMMARY"
