@@ -5,6 +5,7 @@ import type {ICartModuleService,IPaymentModuleService} from "@medusajs/framework
 import {MercurModules,SellerStatus,PayoutAccountStatus} from "@mercurjs/types";
 import {database,state,secret,close} from "../../src/providers/np-direct/runtime";
 import {reconcilePaidOrder,reconcilePaidOrders} from "../../src/providers/np-direct/completion";
+import {reconcileBatch} from "../../src/providers/np-direct/reconciliation-batch";
 import {completionDisposition} from "../../src/providers/np-direct/completion-state";
 import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
 import {readFileSync} from "node:fs";
@@ -152,6 +153,21 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     }finally{run.mockRestore();}
     const q=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:cart.id}});
     expect(q.data).toHaveLength(0);expect((await cartModule.retrieveCart(cart.id)).completed_at).toBeNull();
+    expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+  });
+  it("isolates review and retry failures without exposing error messages",async()=>{
+    const calls:string[]=[];
+    const result=await reconcileBatch(["partial","bad","good","good"],async id=>{calls.push(id);if(id==="partial")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");if(id==="bad")throw Error("private failure");});
+    expect(calls).toEqual(["partial","bad","good"]);expect(result.map(x=>x.status)).toEqual(["review","retry","completed"]);
+    expect(JSON.stringify(result)).not.toContain("private");
+    await expect(reconcileBatch(Array(101).fill("x"),async()=>{})).rejects.toThrow("NP_RECONCILIATION_BATCH_LIMIT");
+  });
+  it("pages 101 real DB candidates and never treats missing Intent as completed",async()=>{
+    const r=await post();expect(r.status).toBe(200);
+    await database().query(`INSERT INTO np_poc_b3_orders SELECT 'batch_'||lpad(g::text,3,'0'),seller_id,listing_id,account_id,amount_minor,fee_minor,currency,'paid' FROM np_poc_b3_orders CROSS JOIN generate_series(1,101) g WHERE order_id=$1`,[r.data.order_id]);
+    await database().query(`INSERT INTO np_poc_b305_checkout_authority(order_id,buyer_id,cart_id,payment_collection_id,snapshot_hash) SELECT order_id,'batch_buyer','cart_'||order_id,'collection_'||order_id,repeat('a',64) FROM np_poc_b3_orders WHERE order_id LIKE 'batch_%'`);
+    const first=await reconcilePaidOrders(c);expect(first.results).toHaveLength(100);expect(first.nextCursor).toBe("batch_100");expect(first.results.every(x=>x.status==="retry")).toBe(true);
+    const second=await reconcilePaidOrders(c,first.nextCursor!);expect(second.results).toEqual([{orderId:"batch_101",status:"retry"}]);expect(second.nextCursor).toBeNull();
     expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
   });
   it("unpaid source order cannot authorize standard completion",async()=>{
