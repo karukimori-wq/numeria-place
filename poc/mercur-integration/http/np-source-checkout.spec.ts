@@ -1,4 +1,4 @@
-import {chromium} from "playwright";
+const {chromium}=require("playwright");
 import {installRequeueAudit,requeueReviewedOrder} from "../../src/providers/np-direct/reconciliation-requeue";
 import {installRetryQueue,runDueReconciliation} from "../../src/providers/np-direct/reconciliation-retry";
 // Real Mercur modules/links, real DB seals; Stripe transport and Connect registry are offline fixtures.
@@ -240,7 +240,7 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const browser=await chromium.launch({headless:true});
     try{
       const page=await browser.newPage({viewport:{width:390,height:844}});
-      const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+      const errors:string[]=[];page.on("pageerror",(e:Error)=>errors.push(e.message));
       await page.goto(api.defaults.baseURL+"/np-ops/review");
       await page.getByLabel("注文ID",{exact:true}).fill("http_review");
       await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
