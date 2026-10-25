@@ -254,6 +254,11 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
       expect(await page.locator("#token").inputValue()).toBe("");
       expect(await page.evaluate(()=>Object.keys(localStorage).length+Object.keys(sessionStorage).length)).toBe(0);
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      for(const width of [375,390,430,768,1440]){
+        await page.setViewportSize({width,height:900});
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+        await page.screenshot({path:"np-browser-artifacts/review-"+width+".png",fullPage:true});
+      }
       await db.query("DELETE FROM np_poc_retry_operators WHERE actor_id=$1",[user.id]);
       await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
       await page.getByRole("button",{name:"状態を確認"}).click();

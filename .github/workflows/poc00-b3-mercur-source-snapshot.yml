@@ -104,6 +104,13 @@ jobs:
       - name: Test sealed source checkout, standard completion, replay, refund and no-Transfer
         working-directory: mercur/integration-tests
         run: bun run test:integration:http -- --runTestsByPath http/np/np-direct-runtime.spec.ts http/np/np-buyer-checkout.spec.ts http/np/np-source-checkout.spec.ts
+      - name: Upload operator review screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: np-operator-review
+          path: mercur/integration-tests/np-browser-artifacts/
+          if-no-files-found: ignore
       - name: Declare strict scope
         if: always()
         run: |
