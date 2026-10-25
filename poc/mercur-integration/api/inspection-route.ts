@@ -4,7 +4,7 @@ export const GET=async(req:AuthenticatedMedusaRequest,res:MedusaResponse)=>{
   res.setHeader("Cache-Control","no-store");
   const c=await database().connect();
   try{
-    await c.query("BEGIN");
+    await c.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     const grant=await c.query("SELECT 1 FROM np_poc_retry_operators WHERE actor_id=$1 AND enabled FOR SHARE",[req.auth_context.actor_id]);
     if(!grant.rowCount){await c.query("ROLLBACK");res.status(403).json({code:"NP_FORBIDDEN"});return;}
     const order=req.params.order_id;
