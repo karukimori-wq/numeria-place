@@ -228,6 +228,24 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     for(const orderId of ["partial","stale"])await expect(requeueReviewedOrder(db,{requestId:"00000000-0000-4000-8000-000000000002",actorId:"operator",orderId,expectedAttempts:3,budget:1,reason:"binding_verified"})).rejects.toThrow("NP_REQUEUE_STATE_CONFLICT");
     expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(0);
   });
+  it("HTTP requeue requires user bearer authentication and an independent operator grant",async()=>{
+    const db=database();await installRetryQueue(db);await installRequeueAudit(db);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id,state,attempts,stop_reason) VALUES('http_review','review',5,'attempt_limit')");
+    const user=await c.resolve(Modules.USER).createUsers({email:"operator@example.test"});
+    const identity=await c.resolve(Modules.AUTH).createAuthIdentities({provider_identities:[{provider:"emailpass",entity_id:"operator@example.test",provider_metadata:{}}],app_metadata:{user_id:user.id}});
+    const config=c.resolve(ContainerRegistrationKeys.CONFIG_MODULE).projectConfig.http;
+    const token=generateJwtToken({actor_id:user.id,actor_type:"user",auth_identity_id:identity.id},{secret:config.jwtSecret,expiresIn:"1d",jwtOptions:config.jwtOptions});
+    const headers={authorization:"Bearer "+token};
+    const body={requestId:"00000000-0000-4000-8000-000000000003",expectedAttempts:5,budget:1,reason:"binding_verified"};
+    const send=(h:any,b:any=body)=>api.post("/np-ops/retries/http_review/requeue",b,{headers:h,validateStatus:()=>true});
+    expect((await send({})).status).toBe(401);expect((await send(buyer.headers)).status).toBe(401);
+    expect((await send(headers)).status).toBe(403);
+    await db.query("INSERT INTO np_poc_retry_operators VALUES($1,true)",[user.id]);
+    expect((await send(headers,{...body,actorId:user.id})).status).toBe(400);
+    expect((await send(headers)).status).toBe(200);expect((await send(headers)).data.result).toBe("duplicate");
+    expect((await db.query("SELECT actor_id FROM np_poc_retry_requeue_audit")).rows).toEqual([{actor_id:user.id}]);
+    await db.query("UPDATE np_poc_retry_operators SET enabled=false");expect((await send(headers)).status).toBe(403);
+  });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);
     await expect(reconcilePaidOrder(r.data.order_id,c)).rejects.toThrow("NP_COMPLETION_REQUIRES_PAID");
