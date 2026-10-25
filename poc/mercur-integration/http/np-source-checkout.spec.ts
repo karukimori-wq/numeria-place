@@ -1,3 +1,4 @@
+import {chromium} from "playwright";
 import {installRequeueAudit,requeueReviewedOrder} from "../../src/providers/np-direct/reconciliation-requeue";
 import {installRetryQueue,runDueReconciliation} from "../../src/providers/np-direct/reconciliation-retry";
 // Real Mercur modules/links, real DB seals; Stripe transport and Connect registry are offline fixtures.
@@ -236,6 +237,29 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const config=c.resolve(ContainerRegistrationKeys.CONFIG_MODULE).projectConfig.http;
     const token=generateJwtToken({actor_id:user.id,actor_type:"user",auth_identity_id:identity.id},{secret:config.jwtSecret,expiresIn:"1d",jwtOptions:config.jwtOptions});
     const headers={authorization:"Bearer "+token};
+    const browser=await chromium.launch({headless:true});
+    try{
+      const page=await browser.newPage({viewport:{width:390,height:844}});
+      const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+      await page.goto(api.defaults.baseURL+"/np-ops/review");
+      await page.getByLabel("注文ID",{exact:true}).fill("http_review");
+      await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
+      await page.getByRole("button",{name:"状態を確認"}).click();
+      await page.getByRole("status").filter({hasText:"閲覧権限がありません。"}).waitFor();
+      await db.query("INSERT INTO np_poc_retry_operators VALUES($1,true)",[user.id]);
+      await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
+      await page.getByRole("button",{name:"状態を確認"}).click();
+      await page.getByRole("status").filter({hasText:"確認できました。"}).waitFor();
+      expect(await page.locator("#queue").textContent()).toContain("attempt_limit");
+      expect(await page.locator("#token").inputValue()).toBe("");
+      expect(await page.evaluate(()=>Object.keys(localStorage).length+Object.keys(sessionStorage).length)).toBe(0);
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      await db.query("DELETE FROM np_poc_retry_operators WHERE actor_id=$1",[user.id]);
+      await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
+      await page.getByRole("button",{name:"状態を確認"}).click();
+      await page.getByRole("status").filter({hasText:"閲覧権限がありません。"}).waitFor();
+      expect(await page.locator("#result").isHidden()).toBe(true);expect(errors).toEqual([]);
+    }finally{await browser.close();}
     const body={requestId:"00000000-0000-4000-8000-000000000003",expectedAttempts:5,budget:1,reason:"binding_verified"};
     const send=(h:any,b:any=body)=>api.post("/np-ops/retries/http_review/requeue",b,{headers:h,validateStatus:()=>true});
     const inspect=(h:any,id="http_review")=>api.get("/np-ops/retries/"+id,{headers:h,validateStatus:()=>true});

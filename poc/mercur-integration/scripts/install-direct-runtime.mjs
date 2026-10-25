@@ -51,6 +51,9 @@ const opsApi=join(root,"integration-tests/src/api/np-ops/retries/[order_id]/requ
 cpSync(join(np,"poc/mercur-integration/api/requeue-route.ts"),join(opsApi,"route.ts"));
 const inspectApi=join(root,"integration-tests/src/api/np-ops/retries/[order_id]");mkdirSync(inspectApi,{recursive:true});
 cpSync(join(np,"poc/mercur-integration/api/inspection-route.ts"),join(inspectApi,"route.ts"));
+const reviewApi=join(root,"integration-tests/src/api/np-ops/review");mkdirSync(reviewApi,{recursive:true});
+cpSync(join(np,"poc/mercur-integration/api/review-route.ts"),join(reviewApi,"route.ts"));
+cpSync(join(np,"poc/mercur-integration/api/review.html"),join(reviewApi,"screen.html"));
 // Typecheck only NP integration surface against installed pinned Medusa/Mercur.
 writeFileSync(join(root,"integration-tests/tsconfig.np.json"),JSON.stringify({compilerOptions:{
   target:"ES2022",module:"Node16",moduleResolution:"Node16",esModuleInterop:true,
