@@ -238,13 +238,21 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const headers={authorization:"Bearer "+token};
     const body={requestId:"00000000-0000-4000-8000-000000000003",expectedAttempts:5,budget:1,reason:"binding_verified"};
     const send=(h:any,b:any=body)=>api.post("/np-ops/retries/http_review/requeue",b,{headers:h,validateStatus:()=>true});
+    const inspect=(h:any,id="http_review")=>api.get("/np-ops/retries/"+id,{headers:h,validateStatus:()=>true});
+    expect((await inspect({})).status).toBe(401);expect((await inspect(buyer.headers)).status).toBe(401);
+    expect((await inspect(headers)).status).toBe(403);
     expect((await send({})).status).toBe(401);expect((await send(buyer.headers)).status).toBe(401);
     expect((await send(headers)).status).toBe(403);
     await db.query("INSERT INTO np_poc_retry_operators VALUES($1,true)",[user.id]);
     expect((await send(headers,{...body,actorId:user.id})).status).toBe(400);
+    expect((await inspect(headers,"missing")).status).toBe(404);
     expect((await send(headers)).status).toBe(200);expect((await send(headers)).data.result).toBe("duplicate");
     expect((await db.query("SELECT actor_id FROM np_poc_retry_requeue_audit")).rows).toEqual([{actor_id:user.id}]);
-    await db.query("UPDATE np_poc_retry_operators SET enabled=false");expect((await send(headers)).status).toBe(403);
+    const viewed=await inspect(headers);expect(viewed.status).toBe(200);expect(viewed.headers["cache-control"]).toBe("no-store");
+    expect(Object.keys(viewed.data.queue).sort()).toEqual(["attempts","max_attempts","next_at","order_id","state","stop_reason"]);
+    expect(viewed.data.audit).toHaveLength(1);expect(viewed.data.audit[0].actor_id).toBe(user.id);
+    expect(JSON.stringify(viewed.data)).not.toContain("lease_until");expect(JSON.stringify(viewed.data)).not.toContain("client_secret");
+    await db.query("UPDATE np_poc_retry_operators SET enabled=false");expect((await inspect(headers)).status).toBe(403);expect((await send(headers)).status).toBe(403);
   });
   it("unpaid source order cannot authorize standard completion",async()=>{
     const r=await post();expect(r.status).toBe(200);
