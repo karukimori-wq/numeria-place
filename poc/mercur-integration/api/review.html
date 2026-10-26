@@ -36,6 +36,7 @@ const input=document.querySelector('#resume-token'), bearer=input.value;input.va
 const submit=resume.querySelector('button');submit.disabled=true;button.disabled=true;
 try{
 const r=await fetch('/np-ops/retries/'+encodeURIComponent(current.order)+'/requeue',{method:'POST',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:JSON.stringify({requestId:pending.requestId,expectedAttempts:pending.expectedAttempts,budget:pending.budget,reason:pending.reason}),cache:'no-store',credentials:'omit',redirect:'error'});
+if(r.status===401||r.status===403)throw Error('AUTH_RECHECK');
 if(r.status>=500)throw Error('UNKNOWN');
 pending=null;document.querySelector('#order').disabled=false;document.querySelector('#budget').disabled=false;
 viewed=null;result.hidden=true;resume.hidden=true;

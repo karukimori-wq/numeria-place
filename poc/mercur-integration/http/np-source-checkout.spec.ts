@@ -281,11 +281,25 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
       page.once("dialog",(dialog:any)=>dialog.accept());
       await page.getByRole("button",{name:"内容を確認して追加"}).click();
       await page.getByRole("status").filter({hasText:"結果不明です。"}).waitFor();
+      await db.query("UPDATE np_poc_retry_operators SET enabled=false WHERE actor_id=$1",[user.id]);
+      await page.getByLabel("操作用Bearerトークン").fill(token);
+      page.once("dialog",(dialog:any)=>dialog.accept());
+      await page.getByRole("button",{name:"内容を確認して追加"}).click();
+      await page.getByRole("status").filter({hasText:"結果不明です。"}).waitFor();
+      expect(await page.locator("#load").isDisabled()).toBe(true);
+      expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(1);
+      await db.query("UPDATE np_poc_retry_operators SET enabled=true WHERE actor_id=$1",[user.id]);
+      await page.getByLabel("操作用Bearerトークン").fill("invalid-token");
+      page.once("dialog",(dialog:any)=>dialog.accept());
+      await page.getByRole("button",{name:"内容を確認して追加"}).click();
+      await page.getByRole("status").filter({hasText:"結果不明です。"}).waitFor();
+      expect(await page.locator("#load").isDisabled()).toBe(true);
+
       await page.getByLabel("操作用Bearerトークン").fill(token);
       page.once("dialog",(dialog:any)=>dialog.accept());
       await page.getByRole("button",{name:"内容を確認して追加"}).click();
       await page.getByRole("status").filter({hasText:"試行枠を追加しました。"}).waitFor();
-      expect(bodies).toHaveLength(2);expect(bodies[0]).toEqual(bodies[1]);
+      expect(bodies).toHaveLength(4);for(const body of bodies)expect(body).toEqual(bodies[0]);
       expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(1);
       expect((await db.query("SELECT state,max_attempts FROM np_poc_retry_queue WHERE order_id='http_review'")).rows[0]).toEqual({state:"retry",max_attempts:6});
       await db.query("UPDATE np_poc_retry_queue SET state='review',max_attempts=5,stop_reason='attempt_limit' WHERE order_id='http_review'");
