@@ -275,9 +275,18 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
       await page.getByRole("status").filter({hasText:"確認できました。"}).waitFor();
       await page.getByLabel("注文と決済の紐づけを確認しました").check();
       await page.getByLabel("操作用Bearerトークン").fill(token);
+      const bodies:any[]=[];
+      page.on("request",(r:any)=>{if(r.method()==="POST"&&r.url().endsWith("/requeue"))bodies.push(r.postDataJSON());});
+      await page.route("**/np-ops/retries/http_review/requeue",async(route:any)=>{await route.fetch();await route.abort();},{times:1});
+      page.once("dialog",(dialog:any)=>dialog.accept());
+      await page.getByRole("button",{name:"内容を確認して追加"}).click();
+      await page.getByRole("status").filter({hasText:"結果不明です。"}).waitFor();
+      await page.getByLabel("操作用Bearerトークン").fill(token);
       page.once("dialog",(dialog:any)=>dialog.accept());
       await page.getByRole("button",{name:"内容を確認して追加"}).click();
       await page.getByRole("status").filter({hasText:"試行枠を追加しました。"}).waitFor();
+      expect(bodies).toHaveLength(2);expect(bodies[0]).toEqual(bodies[1]);
+      expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(1);
       expect((await db.query("SELECT state,max_attempts FROM np_poc_retry_queue WHERE order_id='http_review'")).rows[0]).toEqual({state:"retry",max_attempts:6});
       await db.query("UPDATE np_poc_retry_queue SET state='review',max_attempts=5,stop_reason='attempt_limit' WHERE order_id='http_review'");
       await db.query("DELETE FROM np_poc_retry_requeue_audit");
