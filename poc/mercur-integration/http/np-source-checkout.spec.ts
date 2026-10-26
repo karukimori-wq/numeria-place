@@ -259,6 +259,14 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
         expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
         await page.screenshot({path:"np-browser-artifacts/review-"+width+".png",fullPage:true});
       }
+      await page.getByLabel("注文と決済の紐づけを確認しました").check();
+      await page.getByLabel("操作用Bearerトークン").fill(token);
+      page.once("dialog",(dialog:any)=>dialog.accept());
+      await page.getByRole("button",{name:"内容を確認して追加"}).click();
+      await page.getByRole("status").filter({hasText:"試行枠を追加しました。"}).waitFor();
+      expect((await db.query("SELECT state,max_attempts FROM np_poc_retry_queue WHERE order_id='http_review'")).rows[0]).toEqual({state:"retry",max_attempts:6});
+      await db.query("UPDATE np_poc_retry_queue SET state='review',max_attempts=5,stop_reason='attempt_limit' WHERE order_id='http_review'");
+      await db.query("DELETE FROM np_poc_retry_requeue_audit");
       await db.query("DELETE FROM np_poc_retry_operators WHERE actor_id=$1",[user.id]);
       await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
       await page.getByRole("button",{name:"状態を確認"}).click();

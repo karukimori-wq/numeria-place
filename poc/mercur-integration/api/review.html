@@ -1,14 +1,17 @@
 <!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NP 運用確認 PoC</title>
 <style>body{background:#F8F7F5;color:#111A32;font:16px system-ui;margin:0;padding:24px}main{max-width:800px;margin:auto}label{display:block;margin-top:16px}input,button{box-sizing:border-box;width:100%;min-height:48px;font:inherit;padding:10px}button{background:#111A32;color:white;border:0;margin-top:16px;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:16px}h1{font-size:26px}</style>
-<main><h1>運用確認</h1><p>検証環境専用・閲覧のみ。注文の再試行状態と直近50件の履歴を確認できます。</p>
+<main><h1>運用確認</h1><p>検証環境専用。注文の再試行状態と直近50件の履歴を確認できます。</p>
 <form id="inspect"><label for="order">注文ID</label><input id="order" required maxlength="200" autocomplete="off">
 <label for="token">検証用の運用者Bearerトークン</label><input id="token" type="password" required autocomplete="off">
 <p>トークンは保存しません。確認後は入力を消去します。本番ログインは未接続です。</p><button id="load">状態を確認</button></form>
-<p id="status" role="status" aria-live="polite">注文IDを入力してください。</p><section id="result" hidden><h2>再試行状態</h2><pre id="queue"></pre><h2>試行履歴</h2><pre id="history"></pre><h2>操作記録</h2><pre id="audit"></pre><p id="more"></p></section></main>
+<p id="status" role="status" aria-live="polite">注文IDを入力してください。</p><section id="result" hidden><h2>再試行状態</h2><pre id="queue"></pre><h2>試行履歴</h2><pre id="history"></pre><h2>操作記録</h2><pre id="audit"></pre><p id="more"></p><form id="resume" hidden><h2>再試行枠の追加</h2><p id="target"></p><label for="budget">追加試行回数（1〜5）</label><input id="budget" type="number" min="1" max="5" value="1" required><label for="verified"><input id="verified" type="checkbox" required>注文と決済の紐づけを確認しました</label><label for="resume-token">操作用Bearerトークン</label><input id="resume-token" type="password" required autocomplete="off"><button>内容を確認して追加</button><p>決済や照合処理は直ちに実行されません。</p></form></section></main>
 <script>
 const form=document.querySelector('#inspect'), status=document.querySelector('#status'), result=document.querySelector('#result'), token=document.querySelector('#token'), button=document.querySelector('#load');
+let viewed=null;
+const resume=document.querySelector('#resume');
+document.querySelector('#order').addEventListener('input',()=>{viewed=null;result.hidden=true;resume.hidden=true;});
 form.addEventListener('submit',async e=>{
-e.preventDefault();result.hidden=true;for(const id of ['queue','history','audit'])document.getElementById(id).textContent='';
+e.preventDefault();viewed=null;resume.hidden=true;result.hidden=true;for(const id of ['queue','history','audit'])document.getElementById(id).textContent='';
 button.disabled=true;status.textContent='確認中…';
 const bearer=token.value;token.value='';
 try{
@@ -16,7 +19,25 @@ const r=await fetch('/np-ops/retries/'+encodeURIComponent(document.querySelector
 if(!r.ok){status.textContent=({401:'認証が必要です。',403:'閲覧権限がありません。',404:'注文が見つかりません。'})[r.status]||'確認できませんでした。再試行してください。';return;}
 const d=await r.json();for(const id of ['queue','history','audit'])document.getElementById(id).textContent=JSON.stringify(d[id],null,2);
 document.querySelector('#more').textContent=d.history_has_more||d.audit_has_more?'直近50件のみ表示しています。続きの閲覧は未対応です。':'取得した履歴をすべて表示しています。';
+viewed={order:d.queue.order_id,attempts:d.queue.attempts};
+resume.hidden=!(d.queue.state==='review'&&d.queue.stop_reason==='attempt_limit'&&d.queue.attempts<100);
+document.querySelector('#target').textContent='対象注文: '+viewed.order+' / 現在の試行回数: '+viewed.attempts;
+document.querySelector('#verified').checked=false;
 result.hidden=false;status.textContent='確認できました。';
 }catch{status.textContent='通信に失敗しました。再試行してください。';}finally{button.disabled=false;}
+});
+resume.addEventListener('submit',async e=>{
+e.preventDefault();if(!viewed)return;
+const budget=Number(document.querySelector('#budget').value), current={...viewed};
+if(!Number.isInteger(budget)||budget<1||budget>5||current.attempts+budget>100)return;
+if(!confirm('注文 '+current.order+' に '+budget+' 回の試行枠を追加しますか？'))return;
+const input=document.querySelector('#resume-token'), bearer=input.value;input.value='';
+const submit=resume.querySelector('button');submit.disabled=true;button.disabled=true;
+try{
+const r=await fetch('/np-ops/retries/'+encodeURIComponent(current.order)+'/requeue',{method:'POST',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),expectedAttempts:current.attempts,budget,reason:'binding_verified'}),cache:'no-store',credentials:'omit',redirect:'error'});
+viewed=null;result.hidden=true;resume.hidden=true;
+status.textContent=r.ok?'試行枠を追加しました。状態を再読込してください。':r.status===409?'状態が変わりました。再読込して確認してください。':r.status===403?'操作権限がありません。':'結果を確認できません。状態と操作記録を再読込してください。';
+}catch{viewed=null;result.hidden=true;resume.hidden=true;status.textContent='結果を確認できません。状態と操作記録を再読込してください。';}
+finally{submit.disabled=false;button.disabled=false;}
 });
 </script></html>
