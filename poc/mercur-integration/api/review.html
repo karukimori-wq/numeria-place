@@ -7,7 +7,7 @@
 <p id="status" role="status" aria-live="polite">注文IDを入力してください。</p><section id="result" hidden><h2>再試行状態</h2><pre id="queue"></pre><h2>試行履歴</h2><pre id="history"></pre><h2>操作記録</h2><pre id="audit"></pre><p id="more"></p><form id="resume" hidden><h2>再試行枠の追加</h2><p id="target"></p><label for="budget">追加試行回数（1〜5）</label><input id="budget" type="number" min="1" max="5" value="1" required><label for="verified"><input id="verified" type="checkbox" required>注文と決済の紐づけを確認しました</label><label for="resume-token">操作用Bearerトークン</label><input id="resume-token" type="password" required autocomplete="off"><button>内容を確認して追加</button><p>決済や照合処理は直ちに実行されません。</p></form></section></main>
 <script>
 const form=document.querySelector('#inspect'), status=document.querySelector('#status'), result=document.querySelector('#result'), token=document.querySelector('#token'), button=document.querySelector('#load');
-let viewed=null;
+let viewed=null, pending=null;
 const resume=document.querySelector('#resume');
 document.querySelector('#order').addEventListener('input',()=>{viewed=null;result.hidden=true;resume.hidden=true;});
 form.addEventListener('submit',async e=>{
@@ -28,16 +28,19 @@ result.hidden=false;status.textContent='確認できました。';
 });
 resume.addEventListener('submit',async e=>{
 e.preventDefault();if(!viewed)return;
-const budget=Number(document.querySelector('#budget').value), current={...viewed};
+const budget=pending?pending.budget:Number(document.querySelector('#budget').value), current=pending?{order:pending.order,attempts:pending.expectedAttempts}:{...viewed};
 if(!Number.isInteger(budget)||budget<1||budget>5||current.attempts+budget>100)return;
 if(!confirm('注文 '+current.order+' に '+budget+' 回の試行枠を追加しますか？'))return;
+if(!pending)pending={order:current.order,requestId:crypto.randomUUID(),expectedAttempts:current.attempts,budget,reason:'binding_verified'};
 const input=document.querySelector('#resume-token'), bearer=input.value;input.value='';
 const submit=resume.querySelector('button');submit.disabled=true;button.disabled=true;
 try{
-const r=await fetch('/np-ops/retries/'+encodeURIComponent(current.order)+'/requeue',{method:'POST',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),expectedAttempts:current.attempts,budget,reason:'binding_verified'}),cache:'no-store',credentials:'omit',redirect:'error'});
+const r=await fetch('/np-ops/retries/'+encodeURIComponent(current.order)+'/requeue',{method:'POST',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:JSON.stringify({requestId:pending.requestId,expectedAttempts:pending.expectedAttempts,budget:pending.budget,reason:pending.reason}),cache:'no-store',credentials:'omit',redirect:'error'});
+if(r.status>=500)throw Error('UNKNOWN');
+pending=null;document.querySelector('#order').disabled=false;document.querySelector('#budget').disabled=false;
 viewed=null;result.hidden=true;resume.hidden=true;
 status.textContent=r.ok?'試行枠を追加しました。状態を再読込してください。':r.status===409?'状態が変わりました。再読込して確認してください。':r.status===403?'操作権限がありません。':'結果を確認できません。状態と操作記録を再読込してください。';
-}catch{viewed=null;result.hidden=true;resume.hidden=true;status.textContent='結果を確認できません。状態と操作記録を再読込してください。';}
-finally{submit.disabled=false;button.disabled=false;}
+}catch{document.querySelector('#order').disabled=true;document.querySelector('#budget').disabled=true;status.textContent='結果不明です。操作用トークンを再入力し、同じ操作を再送してください。ページを閉じると再送情報は失われます。';}
+finally{submit.disabled=false;button.disabled=!!pending;}
 });
 </script></html>
