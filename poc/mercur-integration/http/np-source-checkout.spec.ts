@@ -261,6 +261,20 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
       }
       await page.getByLabel("注文と決済の紐づけを確認しました").check();
       await page.getByLabel("操作用Bearerトークン").fill(token);
+      page.once("dialog",(dialog:any)=>dialog.dismiss());
+      await page.getByRole("button",{name:"内容を確認して追加"}).click();
+      expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(0);
+      await db.query("UPDATE np_poc_retry_queue SET attempts=6 WHERE order_id='http_review'");
+      page.once("dialog",(dialog:any)=>dialog.accept());
+      await page.getByRole("button",{name:"内容を確認して追加"}).click();
+      await page.getByRole("status").filter({hasText:"状態が変わりました。"}).waitFor();
+      expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(0);
+      await db.query("UPDATE np_poc_retry_queue SET attempts=5 WHERE order_id='http_review'");
+      await page.getByLabel("検証用の運用者Bearerトークン").fill(token);
+      await page.getByRole("button",{name:"状態を確認"}).click();
+      await page.getByRole("status").filter({hasText:"確認できました。"}).waitFor();
+      await page.getByLabel("注文と決済の紐づけを確認しました").check();
+      await page.getByLabel("操作用Bearerトークン").fill(token);
       page.once("dialog",(dialog:any)=>dialog.accept());
       await page.getByRole("button",{name:"内容を確認して追加"}).click();
       await page.getByRole("status").filter({hasText:"試行枠を追加しました。"}).waitFor();
