@@ -289,7 +289,8 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
       expect(await page.locator("#load").isDisabled()).toBe(true);
       expect((await db.query("SELECT count(*)::int n FROM np_poc_retry_requeue_audit")).rows[0].n).toBe(1);
       await db.query("UPDATE np_poc_retry_operators SET enabled=true WHERE actor_id=$1",[user.id]);
-      await page.getByLabel("操作用Bearerトークン").fill("invalid-token");
+      const expiredToken=generateJwtToken({actor_id:user.id,actor_type:"user",auth_identity_id:identity.id},{secret:config.jwtSecret,expiresIn:-60,jwtOptions:config.jwtOptions});
+      await page.getByLabel("操作用Bearerトークン").fill(expiredToken);
       page.once("dialog",(dialog:any)=>dialog.accept());
       await page.getByRole("button",{name:"内容を確認して追加"}).click();
       await page.getByRole("status").filter({hasText:"結果不明です。"}).waitFor();
