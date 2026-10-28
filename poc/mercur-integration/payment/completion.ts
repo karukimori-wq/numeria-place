@@ -7,7 +7,7 @@ import {sourceSnapshot} from "./source-checkout";
 import {completionDisposition} from "./completion-state";
 import {reconcileBatch} from "./reconciliation-batch";
 import {providerId} from "./checkout-binding";
-export async function reconcilePaidOrder(orderId:string,scope:any) {
+export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=false) {
   const pg=scope.resolve(ContainerRegistrationKeys.PG_CONNECTION);
   // A dedicated advisory lock serializes duplicate webhooks and worker retries
   // across processes. Modules use their own connections, so do not row-lock cart.
@@ -17,7 +17,11 @@ export async function reconcilePaidOrder(orderId:string,scope:any) {
       FROM np_poc_b305_checkout_authority a JOIN np_poc_b3_orders o USING(order_id)
       LEFT JOIN np_poc_b3_payment_intents pi USING(order_id)
       WHERE a.order_id=$1 AND a.snapshot_hash IS NOT NULL`,[orderId]);
-    const a=rows[0];if(!a)return; // Old independent fixtures have no source seal.
+    const a=rows[0];if(!a){
+      const knownSource=await pg("np_poc_completion").where({order_id:orderId}).first();
+      if(requireSource||knownSource)throw Error("NP_ORPHAN_COMPLETION_MANUAL_REVIEW");
+      return; // Legacy independent fixtures are not source-backed completion claims.
+    }
     if(!a.intent_id)throw Error("NP_COMPLETION_INTENT_MISSING");
     if(a.state!=="paid")throw Error("NP_COMPLETION_REQUIRES_PAID");
     const evidence=await database().query(`SELECT 1 FROM np_poc_b3_webhook_inbox i
@@ -70,9 +74,9 @@ export async function reconcilePaidOrder(orderId:string,scope:any) {
 // Internal worker entry: safe after NP commit / before HTTP acknowledgement crash.
 // No public HTTP repair endpoint; production scheduling/backoff remains pending.
 export async function reconcilePaidOrders(scope:any,afterOrderId="") {
-  const {rows}=await database().query(`SELECT a.order_id FROM np_poc_b305_checkout_authority a
-    JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND a.snapshot_hash IS NOT NULL AND a.order_id>$1 ORDER BY a.order_id LIMIT 100`,[afterOrderId]);
-  const results=await reconcileBatch(rows.map(row=>row.order_id),id=>reconcilePaidOrder(id,scope));
+  const {rows}=await database().query(`SELECT candidates.order_id FROM (SELECT order_id FROM np_poc_b305_checkout_authority UNION SELECT order_id FROM np_poc_completion) candidates
+    JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND candidates.order_id>$1 ORDER BY candidates.order_id LIMIT 100`,[afterOrderId]);
+  const results=await reconcileBatch(rows.map(row=>row.order_id),id=>reconcilePaidOrder(id,scope,true));
   return {results,nextCursor:rows.length===100?rows[rows.length-1].order_id:null};
 }
 
@@ -80,6 +84,6 @@ export async function reconcilePaidOrders(scope:any,afterOrderId="") {
 export async function reconcileDuePaidOrders(scope:any) {
   
   const db=database();await installRetryQueue(db);
-  await db.query(`INSERT INTO np_poc_retry_queue(order_id) SELECT a.order_id FROM np_poc_b305_checkout_authority a JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND a.snapshot_hash IS NOT NULL ON CONFLICT DO NOTHING`);
-  return runDueReconciliation(db,id=>reconcilePaidOrder(id,scope));
+  await db.query(`INSERT INTO np_poc_retry_queue(order_id) SELECT candidates.order_id FROM (SELECT order_id FROM np_poc_b305_checkout_authority UNION SELECT order_id FROM np_poc_completion) candidates JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' ON CONFLICT DO NOTHING`);
+  return runDueReconciliation(db,id=>reconcilePaidOrder(id,scope,true));
 }

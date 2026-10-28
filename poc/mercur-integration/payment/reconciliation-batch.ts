@@ -7,7 +7,7 @@ export async function reconcileBatch(ids:string[],run:(id:string)=>Promise<unkno
     try {await run(orderId);results.push({orderId,status:"completed"});}
     catch(error) {
       const message=error instanceof Error?error.message:"";
-      results.push({orderId,status:message==="NP_PARTIAL_COMPLETION_MANUAL_REVIEW"?"review":"retry"});
+      results.push({orderId,status:(message==="NP_PARTIAL_COMPLETION_MANUAL_REVIEW"||message==="NP_ORPHAN_COMPLETION_MANUAL_REVIEW")?"review":"retry"});
     }
   }
   return results;

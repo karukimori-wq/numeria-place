@@ -8,6 +8,8 @@ export async function installRetryQueue(db:Pool) {
     attempts integer NOT NULL DEFAULT 0,next_at timestamptz NOT NULL DEFAULT now(),lease_until timestamptz,token uuid);
     ALTER TABLE np_poc_retry_queue ADD COLUMN IF NOT EXISTS max_attempts integer NOT NULL DEFAULT 5 CHECK(max_attempts BETWEEN 1 AND 100);
     ALTER TABLE np_poc_retry_queue ADD COLUMN IF NOT EXISTS stop_reason text CHECK(stop_reason IS NULL OR stop_reason IN ('attempt_limit','partial_completion'));
+    ALTER TABLE np_poc_retry_queue DROP CONSTRAINT IF EXISTS np_poc_retry_queue_stop_reason_check;
+    ALTER TABLE np_poc_retry_queue ADD CONSTRAINT np_poc_retry_queue_stop_reason_check CHECK(stop_reason IS NULL OR stop_reason IN ('attempt_limit','partial_completion','orphan_state'));
     CREATE TABLE IF NOT EXISTS np_poc_retry_history(order_id text NOT NULL,attempt integer NOT NULL,status text NOT NULL CHECK(status IN ('completed','review','retry')),finished_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(order_id,attempt));`);
 }
 export async function runDueReconciliation(db:Pool,run:(id:string)=>Promise<unknown>,limit=100) {
@@ -21,9 +23,9 @@ export async function runDueReconciliation(db:Pool,run:(id:string)=>Promise<unkn
     const q=await db.query(`UPDATE np_poc_retry_queue q SET state='running',stop_reason=NULL,attempts=q.attempts+1,token=$1,lease_until=now()+interval '90 seconds'
       WHERE order_id=(SELECT order_id FROM np_poc_retry_queue WHERE attempts<max_attempts AND ((state='retry' AND next_at<=now()) OR (state='running' AND lease_until<=now())) ORDER BY next_at,order_id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING order_id,attempts,max_attempts`,[token]);
     if(!q.rowCount)break;
-    const row=q.rows[0];let status="completed";
-    try{await run(row.order_id);}catch(e){status=e instanceof Error&&e.message==="NP_PARTIAL_COMPLETION_MANUAL_REVIEW"?"review":"retry";}
-    const reason=status==="review"?"partial_completion":status==="retry"&&row.attempts>=row.max_attempts?"attempt_limit":null;
+    const row=q.rows[0];let status="completed",orphan=false;
+    try{await run(row.order_id);}catch(e){const message=e instanceof Error?e.message:"";orphan=message==="NP_ORPHAN_COMPLETION_MANUAL_REVIEW";status=orphan||message==="NP_PARTIAL_COMPLETION_MANUAL_REVIEW"?"review":"retry";}
+    const reason=status==="review"?(orphan?"orphan_state":"partial_completion"):status==="retry"&&row.attempts>=row.max_attempts?"attempt_limit":null;
     if(reason)status="review";
     const client=await db.connect();
     try{

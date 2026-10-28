@@ -1,3 +1,4 @@
+import {fork,ChildProcess} from "node:child_process";
 const {chromium}=require("playwright");
 import {installRequeueAudit,requeueReviewedOrder} from "../../src/providers/np-direct/reconciliation-requeue";
 import {installRetryQueue,runDueReconciliation} from "../../src/providers/np-direct/reconciliation-retry";
@@ -7,7 +8,7 @@ import {Modules,ContainerRegistrationKeys,generateJwtToken} from "@medusajs/fram
 import type {ICartModuleService,IPaymentModuleService} from "@medusajs/framework/types";
 import {MercurModules,SellerStatus,PayoutAccountStatus} from "@mercurjs/types";
 import {database,state,secret,close} from "../../src/providers/np-direct/runtime";
-import {reconcilePaidOrder,reconcilePaidOrders} from "../../src/providers/np-direct/completion";
+import {reconcilePaidOrder,reconcilePaidOrders,reconcileDuePaidOrders} from "../../src/providers/np-direct/completion";
 import {reconcileBatch} from "../../src/providers/np-direct/reconciliation-batch";
 import {completionDisposition} from "../../src/providers/np-direct/completion-state";
 import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
@@ -152,6 +153,9 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     const engine=c.resolve(Modules.WORKFLOW_ENGINE);const run=jest.spyOn(engine,"run");
     try{
       for(let i=0;i<2;i++)await expect(reconcilePaidOrder(event.orderId,c)).rejects.toThrow("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");
+      expect(await reconcileDuePaidOrders(c)).toEqual([{orderId:event.orderId,status:"review"}]);
+      expect(await reconcileDuePaidOrders(c)).toEqual([]);
+      expect((await database().query("SELECT state,stop_reason FROM np_poc_retry_queue")).rows).toEqual([{state:"review",stop_reason:"partial_completion"}]);
       expect(run).not.toHaveBeenCalled();
     }finally{run.mockRestore();}
     const q=await c.resolve(ContainerRegistrationKeys.QUERY).graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:cart.id}});
@@ -192,6 +196,63 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     await db.query("INSERT INTO np_poc_retry_queue(order_id,state,attempts,lease_until) VALUES('crashed','running',1,now()-interval '1 second')");
     await runDueReconciliation(db,async()=>{});
     expect((await db.query("SELECT attempts,state FROM np_poc_retry_queue WHERE order_id='crashed'")).rows[0]).toEqual({attempts:2,state:"completed"});
+  });
+  function processMessage(child:ChildProcess,phase:string):Promise<any>{
+    return new Promise((resolve,reject)=>{
+      const cleanup=()=>{clearTimeout(timer);child.off("message",message);child.off("exit",exit);};
+      const message=(value:any)=>{if(value.phase===phase){cleanup();resolve(value);}else if(value.phase==="failed"){cleanup();reject(Error("NP_CHILD_FAILED"));}};
+      const exit=()=>{cleanup();reject(Error("NP_CHILD_EXITED_EARLY"));};
+      const timer=setTimeout(()=>{cleanup();reject(Error("NP_CHILD_TIMEOUT"));},15000);
+      child.on("message",message);child.once("exit",exit);
+    });
+  }
+  const startRetryProcess=()=>fork(join(process.cwd(),"http/np/retry-process.cjs"),[],{execArgv:[],stdio:["ignore","ignore","inherit","ipc"]});
+  it("SIGKILL leaves a committed running claim; natural lease expiry permits one recovery",async()=>{
+    const db=database();await installRetryQueue(db);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id) VALUES('killed')");
+    const child=startRetryProcess();
+    try{
+      await processMessage(child,"claimed");
+      const exited=new Promise<{code:number|null;signal:NodeJS.Signals|null}>(resolve=>child.once("exit",(code,signal)=>resolve({code,signal})));
+      expect(child.kill("SIGKILL")).toBe(true);expect(await exited).toEqual({code:null,signal:"SIGKILL"});
+      const read=()=>db.query("SELECT state,attempts,token IS NOT NULL AS token_present,lease_until>now() AS leased FROM np_poc_retry_queue WHERE order_id='killed'");
+      expect((await read()).rows[0]).toEqual({state:"running",attempts:1,token_present:true,leased:true});
+      expect((await db.query("SELECT * FROM np_poc_retry_history")).rows).toHaveLength(0);
+      const run=jest.fn(async()=>{});expect(await runDueReconciliation(db,run)).toEqual([]);expect(run).not.toHaveBeenCalled();
+      // Real database clock expiry, without editing lease_until or simulating a throw.
+      const remaining=Number((await db.query("SELECT GREATEST(0,extract(epoch FROM lease_until-now())*1000)::float8 AS ms FROM np_poc_retry_queue WHERE order_id='killed'")).rows[0].ms);
+      await new Promise(resolve=>setTimeout(resolve,remaining+100));
+      expect(await runDueReconciliation(db,run)).toEqual([{orderId:"killed",status:"completed"}]);expect(run).toHaveBeenCalledTimes(1);
+      expect((await db.query("SELECT attempts,state,token,lease_until FROM np_poc_retry_queue")).rows[0]).toEqual({attempts:2,state:"completed",token:null,lease_until:null});
+      expect((await db.query("SELECT attempt,status FROM np_poc_retry_history")).rows).toEqual([{attempt:2,status:"completed"}]);
+    }finally{if(child.exitCode===null&&child.signalCode===null)child.kill("SIGKILL");}
+  });
+  it("a live stale process cannot finalize after another process reclaims its lease",async()=>{
+    const db=database();await installRetryQueue(db);await db.query("INSERT INTO np_poc_retry_queue(order_id) VALUES('stale_process')");
+    const child=startRetryProcess();
+    try{
+      await processMessage(child,"claimed");
+      // Separate fencing test uses controlled DB expiry; this is not a process-kill claim.
+      await db.query("UPDATE np_poc_retry_queue SET lease_until=now()-interval '1 second'");
+      expect(await runDueReconciliation(db,async()=>{})).toEqual([{orderId:"stale_process",status:"completed"}]);
+      const finished=processMessage(child,"finished");child.send({resume:true});expect((await finished).result).toEqual([]);
+      expect((await db.query("SELECT attempt,status FROM np_poc_retry_history")).rows).toEqual([{attempt:2,status:"completed"}]);
+    }finally{if(child.exitCode===null&&child.signalCode===null)child.kill("SIGKILL");}
+  });
+  it("discovers a paid completion ledger with lost authority and stops for review without workflow",async()=>{
+    const event=await signedPaid("evt_orphan_authority");state.failCompletion=true;
+    try{expect((await event.send()).status).toBe(503);}finally{state.failCompletion=false;}
+    const db=database();await db.query("DELETE FROM np_poc_b305_checkout_authority WHERE order_id=$1",[event.orderId]);
+    const run=jest.spyOn(c.resolve(Modules.WORKFLOW_ENGINE),"run");
+    try{
+      expect((await event.send()).status).toBe(503);
+      expect(await reconcileDuePaidOrders(c)).toEqual([{orderId:event.orderId,status:"review"}]);
+      expect(await reconcileDuePaidOrders(c)).toEqual([]);expect(run).not.toHaveBeenCalled();
+      expect((await db.query("SELECT state,stop_reason FROM np_poc_retry_queue")).rows).toEqual([{state:"review",stop_reason:"orphan_state"}]);
+      expect((await db.query("SELECT state FROM np_poc_b3_orders WHERE order_id=$1",[event.orderId])).rows[0].state).toBe("paid");
+      expect((await pg("np_poc_completion").first()).state).toBe("pending");
+      expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+    }finally{run.mockRestore();}
   });
   it("stops at persisted attempt ceiling while allowing success on the final attempt",async()=>{
     const db=database();await installRetryQueue(db);
