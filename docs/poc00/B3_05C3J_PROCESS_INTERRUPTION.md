@@ -1,6 +1,6 @@
 # B3-05c-3j: process interruption and bounded orphan review
 
-2026-10-28. Disposable pinned Mercur integration overlay only. Validation pending.
+2026-10-28. Disposable pinned Mercur integration overlay only. Limited acceptance PASS; mandatory recovery work remains incomplete.
 
 ## Change and acceptance checks
 
@@ -30,4 +30,15 @@ No actual Stripe transport/webhook delivery, NS delivery, periodic worker, produ
 
 ## Validation
 
-Local syntax and diff checks pass. Pinned Mercur build/typecheck/integration results will be recorded after Actions completes. Three new test cases; the existing partial-state case is also extended. No pass claimed before final logs.
+Local syntax and diff checks pass. Three new test cases bring the integration total from 45 to 48; the existing partial-state case is also extended.
+
+[Actions 40702035957](https://github.com/karukimori-wq/numeria-place/actions/runs/40702035957), code `56d00180615ce97637ff30b89ca8cdfdc66a6dcf`: build/typecheck PASS; **47/48 tests, 2/3 suites PASS, overall FAIL**. The source suite containing the new recovery cases passed. The existing 16-parallel independent webhook replay test received four 503 responses. This is not accepted as a complete pass.
+
+The new orphan lookup acquired a second Medusa pool connection while holding an advisory-lock transaction. Competing replay transactions could occupy the pool while waiting for that lock. Schema/ledger lookup now uses the already-held transaction connection. The same 16-replay regression is the acceptance check; no concurrency expectation is relaxed. NP projection and Medusa ledger candidate reads also remain on their respective database connections, paginated at 100 candidates per source.
+
+Code `8310c109815b1850089161ecf7f79ecb76d7c770`: [Actions 40703499688](https://github.com/karukimori-wq/numeria-place/actions/runs/40703499688) **build/typecheck PASS; 3/3 suites and 48/48 tests PASS**, final job logs read. The 16-parallel replay case passed without relaxing its expectation. Source suite 122.904s; full test execution 149.088s. The natural-expiry SIGKILL case, live stale-process fencing, lost-authority orphan review and existing partial-state review are included. All 14 workflows on this code SHA completed successfully (status check; detailed final log review is for the primary integration job).
+
+
+## Next mandatory recovery boundary
+
+Terminate a real Medusa/Mercur workflow process after an observable persisted completion step, inspect its actual module/link/engine state from a fresh process, and prove conservative replay/review without new seller orders. Extend discovery to orphan sessions/collections and paid/completed mismatch after prior queue completion. Do not promote this queue-claim experiment to arbitrary workflow-crash recovery or proceed as if all stage-1 recovery requirements passed. Isolated real Stripe Test Mode and NS sending remain subsequent stages.
