@@ -75,17 +75,32 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
 }
 // Internal worker entry: safe after NP commit / before HTTP acknowledgement crash.
 // No public HTTP repair endpoint; production scheduling/backoff remains pending.
+// NP projection and Medusa tables can live in different test databases. Page
+// each source separately, then check paid status only in the NP database.
+async function paidCompletionCandidates(scope:any,afterOrderId="") {
+  const pg=scope.resolve(ContainerRegistrationKeys.PG_CONNECTION);
+  const ledger=await pg("np_poc_completion").select("order_id").where("order_id",">",afterOrderId).orderBy("order_id").limit(100);
+  const authority=await database().query(`SELECT a.order_id FROM np_poc_b305_checkout_authority a
+    JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND a.order_id>$1 ORDER BY a.order_id LIMIT 100`,[afterOrderId]);
+  const ids=[...new Set<string>([...ledger,...authority.rows].map(row=>row.order_id))].sort().slice(0,100);
+  const {rows}=await database().query("SELECT order_id FROM np_poc_b3_orders WHERE state='paid' AND order_id=ANY($1::text[]) ORDER BY order_id",[ids]);
+  return {ids:rows.map(row=>row.order_id as string),nextCursor:ids.length===100?ids[99]:null};
+}
 export async function reconcilePaidOrders(scope:any,afterOrderId="") {
-  const {rows}=await database().query(`SELECT candidates.order_id FROM (SELECT order_id FROM np_poc_b305_checkout_authority UNION SELECT order_id FROM np_poc_completion) candidates
-    JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' AND candidates.order_id>$1 ORDER BY candidates.order_id LIMIT 100`,[afterOrderId]);
-  const results=await reconcileBatch(rows.map(row=>row.order_id),id=>reconcilePaidOrder(id,scope,true));
-  return {results,nextCursor:rows.length===100?rows[rows.length-1].order_id:null};
+  const page=await paidCompletionCandidates(scope,afterOrderId);
+  const results=await reconcileBatch(page.ids,id=>reconcilePaidOrder(id,scope,true));
+  return {results,nextCursor:page.nextCursor};
 }
 
 // Re-scan from authoritative paid records; do not use a completed cursor as a watermark.
 export async function reconcileDuePaidOrders(scope:any) {
   
   const db=database();await installRetryQueue(db);
-  await db.query(`INSERT INTO np_poc_retry_queue(order_id) SELECT candidates.order_id FROM (SELECT order_id FROM np_poc_b305_checkout_authority UNION SELECT order_id FROM np_poc_completion) candidates JOIN np_poc_b3_orders o USING(order_id) WHERE o.state='paid' ON CONFLICT DO NOTHING`);
+  let cursor="";
+  do {
+    const page=await paidCompletionCandidates(scope,cursor);
+    await db.query("INSERT INTO np_poc_retry_queue(order_id) SELECT unnest($1::text[]) ON CONFLICT DO NOTHING",[page.ids]);
+    cursor=page.nextCursor??"";
+  }while(cursor);
   return runDueReconciliation(db,id=>reconcilePaidOrder(id,scope,true));
 }
