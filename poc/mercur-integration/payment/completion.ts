@@ -19,8 +19,8 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
       WHERE a.order_id=$1 AND a.snapshot_hash IS NOT NULL`,[orderId]);
     const a=rows[0];if(!a){
       // Independent legacy suites do not install the source-completion tables.
-      const installed=(await pg.raw("SELECT to_regclass('public.np_poc_completion') AS relation")).rows[0].relation;
-      const knownSource=installed ? await pg("np_poc_completion").where({order_id:orderId}).first() : null;
+      const installed=(await lock.raw("SELECT to_regclass('public.np_poc_completion') AS relation")).rows[0].relation;
+      const knownSource=installed ? await lock("np_poc_completion").where({order_id:orderId}).first() : null;
       if(requireSource||knownSource)throw Error("NP_ORPHAN_COMPLETION_MANUAL_REVIEW");
       return; // Legacy independent fixtures are not source-backed completion claims.
     }
