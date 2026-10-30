@@ -49,6 +49,7 @@ cpSync(join(np,"poc/mercur-integration/api/source-route.ts"),join(sourceApi,"rou
 cpSync(join(np,"poc/mercur-integration/http/np-source-checkout.spec.ts"),join(root,"integration-tests/http/np/np-source-checkout.spec.ts"));
 cpSync(join(np,"poc/mercur-integration/http/retry-process.cjs"),join(root,"integration-tests/http/np/retry-process.cjs"));
 cpSync(join(np,"poc/mercur-integration/http/workflow-kill.cjs"),join(root,"integration-tests/http/np/workflow-kill.cjs"));
+cpSync(join(np,"poc/mercur-integration/http/workflow-restart.spec.ts"),join(root,"integration-tests/http/np/workflow-restart.spec.ts"));
 const opsApi=join(root,"integration-tests/src/api/np-ops/retries/[order_id]/requeue");mkdirSync(opsApi,{recursive:true});
 cpSync(join(np,"poc/mercur-integration/api/requeue-route.ts"),join(opsApi,"route.ts"));
 const inspectApi=join(root,"integration-tests/src/api/np-ops/retries/[order_id]");mkdirSync(inspectApi,{recursive:true});
@@ -60,5 +61,5 @@ cpSync(join(np,"poc/mercur-integration/api/review.html"),join(reviewApi,"screen.
 writeFileSync(join(root,"integration-tests/tsconfig.np.json"),JSON.stringify({compilerOptions:{
   target:"ES2022",module:"Node16",moduleResolution:"Node16",esModuleInterop:true,
   skipLibCheck:true,strict:true,noEmit:true,types:["node","jest"]
-},include:["src/providers/np-direct/**/*.ts","src/api/hooks/np-direct/route.ts","src/api/np-checkout/**/*.ts","src/api/np-cart-checkout/**/*.ts","src/api/np-ops/**/*.ts","src/api/middlewares.ts","http/np/np-direct-runtime.spec.ts","http/np/np-buyer-checkout.spec.ts","http/np/np-source-checkout.spec.ts"]},null,2));
+},include:["src/providers/np-direct/**/*.ts","src/api/hooks/np-direct/route.ts","src/api/np-checkout/**/*.ts","src/api/np-cart-checkout/**/*.ts","src/api/np-ops/**/*.ts","src/api/middlewares.ts","http/np/np-direct-runtime.spec.ts","http/np/np-buyer-checkout.spec.ts","http/np/np-source-checkout.spec.ts","http/np/workflow-restart.spec.ts"]},null,2));
 console.log("Installed pinned Direct Payment provider, dedicated HTTP endpoint, legacy webhook exclusion and pre-write payout guard (test app only).");

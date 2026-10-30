@@ -1,6 +1,6 @@
 // Runs the actual registered workflow in a disposable Medusa test process.
 const {spawn}=require('node:child_process');
-const {mkdtempSync,readFileSync,rmSync}=require('node:fs');
+const {mkdtempSync,readFileSync,writeFileSync,rmSync}=require('node:fs');
 const {tmpdir}=require('node:os');
 const {join,dirname}=require('node:path');
 const {Pool}=require('pg');
@@ -32,12 +32,12 @@ const checkpoint=join(dir,'checkpoint.json');
     if(completionDisposition(groups.rowCount,0,false)!=='review')throw Error('NP_PARTIAL_NOT_REVIEWED');
     const paid=await np.query('SELECT state FROM np_poc_b3_orders WHERE order_id=$1',[data.orderId]);
     if(paid.rows[0]?.state!=='paid')throw Error('NP_PAID_COMMIT_LOST');
-    await installRetryQueue(np);
-    await np.query('INSERT INTO np_poc_retry_queue(order_id) VALUES($1) ON CONFLICT DO NOTHING',[data.orderId]);
-    await runDueReconciliation(np,async()=>{throw Error('NP_PARTIAL_COMPLETION_MANUAL_REVIEW');});
-    const q=await np.query('SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1',[data.orderId]);
-    if(q.rows[0]?.state!=='review'||q.rows[0]?.stop_reason!=='partial_completion')throw Error('NP_DURABLE_REVIEW_MISSING');
-    let invoked=false;await runDueReconciliation(np,async()=>{invoked=true;});if(invoked)throw Error('NP_REVIEW_RESTARTED');
-    console.log('PASS real workflow SIGKILL: committed group, incomplete cart, NP paid survives; fresh-process conservative review. Full Medusa restart/reconciliation remains unverified.');
+    data.orderIds=(await medusa.query('SELECT id FROM "order" ORDER BY id')).rows.map(r=>r.id);
+    writeFileSync(checkpoint,JSON.stringify(data),{mode:0o600});
+    const recovery=spawn(process.execPath,['--experimental-vm-modules','--max-old-space-size=6144',jest,'--runInBand','--forceExit','--runTestsByPath','http/np/workflow-restart.spec.ts'],{stdio:'inherit',env:{...process.env,TEST_TYPE:'integration:http',MEDUSA_WORKER_MODE:'server',DATABASE_URL:url.toString(),NP_WORKFLOW_CHECKPOINT:checkpoint}});
+    const recoveryTimer=setTimeout(()=>recovery.kill('SIGKILL'),180000);
+    const recoveryCode=await new Promise(resolve=>{recovery.once('error',()=>resolve(-1));recovery.once('exit',code=>resolve(code));});clearTimeout(recoveryTimer);
+    if(recoveryCode!==0)throw Error('NP_RESTART_RECONCILIATION_FAILED');
+    console.log('PASS real workflow SIGKILL: committed group, incomplete cart, NP paid survives; restarted Medusa standard reconciliation enters review without new workflow.');
   }finally{await medusa.end();await np.end();}
 })().catch(()=>{console.error('FAIL real workflow SIGKILL verification (details intentionally omitted)');process.exitCode=1;}).finally(()=>rmSync(dir,{recursive:true,force:true}));

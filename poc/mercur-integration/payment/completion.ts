@@ -35,6 +35,14 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
     const snap=seal.snapshot;
     if(snap.buyerId!==a.buyer_id||snap.sellerId!==a.seller_id||snap.accountId!==a.account_id||snap.amount!==Number(a.amount_minor)||snap.collectionId!==a.payment_collection_id)
       throw Error("NP_COMPLETION_AUTHORITY_MISMATCH");
+    // Partial persisted state is already unsafe to recreate; classify before
+    // contacting the provider so restart safety does not depend on transport.
+    const graph=scope.resolve(ContainerRegistrationKeys.QUERY);
+    const cart=await scope.resolve(Modules.CART).retrieveCart(a.cart_id);
+    const priorGroups=await graph.graph({entity:"order_group",fields:["id"],filters:{cart_id:a.cart_id}});
+    const priorOrders=await graph.graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:a.cart_id}});
+    const disposition=completionDisposition(priorGroups.data.length,priorOrders.data.length,!!cart.completed_at);
+    if(disposition==="review")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");
     const payment=scope.resolve(Modules.PAYMENT);
     const session=await payment.retrievePaymentSession(a.medusa_session_id);
     if(session.provider_id!==providerId||session.payment_collection_id!==a.payment_collection_id||session.data?.id!==a.intent_id||Number(session.amount)!==snap.amount||session.currency_code!==a.currency)
@@ -44,8 +52,6 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
     const provider=payment.paymentProviderService_.retrieveProvider(providerId);
     const remote=await provider.getPaymentStatus({data:session.data});
     if(remote.status!=="captured")throw Error("NP_COMPLETION_PROVIDER_NOT_CAPTURED");
-    const graph=scope.resolve(ContainerRegistrationKeys.QUERY);
-    const cart=await scope.resolve(Modules.CART).retrieveCart(a.cart_id);
     if(!cart.completed_at){
       const current=await sourceSnapshot(a.buyer_id,a.cart_id,scope);
       if(current.hash!==a.snapshot_hash)throw Error("NP_COMPLETION_SOURCE_CHANGED");
@@ -55,10 +61,6 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
     const ledger=await pg("np_poc_completion").where({cart_id:a.cart_id}).first();
     if(ledger.order_id!==orderId||ledger.snapshot_hash!==a.snapshot_hash)throw Error("NP_COMPLETION_LEDGER_CONFLICT");
     if(state.failCompletion)throw Error("NP_INJECTED_BEFORE_COMPLETION");
-    const priorGroups=await graph.graph({entity:"order_group",fields:["id"],filters:{cart_id:a.cart_id}});
-    const priorOrders=await graph.graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:a.cart_id}});
-    const disposition=completionDisposition(priorGroups.data.length,priorOrders.data.length,!!cart.completed_at);
-    if(disposition==="review")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");
     const engine=scope.resolve(Modules.WORKFLOW_ENGINE);
     const result=disposition==="start" ? await engine.run("complete-cart-with-split-orders",{input:{cart_id:a.cart_id}}) : {};
     if(result.errors?.length)throw Error("NP_MERCUR_COMPLETION_FAILED");
