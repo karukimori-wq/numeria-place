@@ -1,3 +1,4 @@
+import {completionReferences} from "./completion-references";
 import {installRetryQueue,runDueReconciliation} from "./reconciliation-retry";
 // Offline integration app only. Replays trusted NP paid state into registered
 // Mercur workflow; never takes a browser order/session/account as authority.
@@ -30,6 +31,7 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
       JOIN np_poc_b3_ns_intake n USING(order_id) JOIN np_poc_b3_paid_outbox b USING(order_id)
       WHERE i.order_id=$1 AND i.event_type='payment_intent.succeeded' AND i.intent_id=$2`,[orderId,a.intent_id]);
     if(!evidence.rowCount)throw Error("NP_COMPLETION_EVIDENCE_MISSING");
+    const {payment,session}=await completionReferences(a,scope);
     const seal=await pg("np_poc_cart_seals").where({cart_id:a.cart_id}).first();
     if(!seal || seal.snapshot_hash!==a.snapshot_hash)throw Error("NP_COMPLETION_SEAL_MISMATCH");
     const snap=seal.snapshot;
@@ -43,8 +45,6 @@ export async function reconcilePaidOrder(orderId:string,scope:any,requireSource=
     const priorOrders=await graph.graph({entity:"order_cart",fields:["order.id"],filters:{cart_id:a.cart_id}});
     const disposition=completionDisposition(priorGroups.data.length,priorOrders.data.length,!!cart.completed_at);
     if(disposition==="review")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");
-    const payment=scope.resolve(Modules.PAYMENT);
-    const session=await payment.retrievePaymentSession(a.medusa_session_id);
     if(session.provider_id!==providerId||session.payment_collection_id!==a.payment_collection_id||session.data?.id!==a.intent_id||Number(session.amount)!==snap.amount||session.currency_code!==a.currency)
       throw Error("NP_COMPLETION_SESSION_MISMATCH");
     // Use the same real DI provider as Medusa authorization: verify remote

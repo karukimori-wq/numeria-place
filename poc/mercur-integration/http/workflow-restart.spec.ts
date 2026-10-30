@@ -23,16 +23,20 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
       orders:await pg('order').select('id').orderBy('id'),
       links:(await container.resolve(ContainerRegistrationKeys.QUERY).graph({entity:'order_cart',fields:['order.id'],filters:{cart_id:data.cartId}})).data,
     });
+    // Read only execution identity/state metadata; never execution/context JSON.
+    const executionMetadata=()=>pg('workflow_execution').where({workflow_id:'complete-cart-with-split-orders'}).whereNull('deleted_at').select('workflow_id','transaction_id','run_id','state').orderBy('transaction_id').orderBy('run_id');
+    const storedBefore=await executionMetadata();
     const before=await snapshot();expect(before.orders.map((o:any)=>o.id)).toEqual(data.orderIds);expect(before.groups).toHaveLength(1);
     expect((await container.resolve(Modules.CART).retrieveCart(data.cartId)).completed_at).toBeNull();
     await expect(reconcilePaidOrder(data.orderId,container,true)).rejects.toThrow('NP_PARTIAL_COMPLETION_MANUAL_REVIEW');
     expect(await reconcileDuePaidOrders(container)).toEqual([{orderId:data.orderId,status:'review'}]);
     expect(await reconcileDuePaidOrders(container)).toEqual([]);
     expect(run).not.toHaveBeenCalled();expect(await snapshot()).toEqual(before);
+    expect(await executionMetadata()).toEqual(storedBefore);
     expect((await database().query('SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1',[data.orderId])).rows).toEqual([{state:'review',stop_reason:'partial_completion'}]);
     // Inspect engine persistence availability without assuming that SIGKILL
     // synchronously flushed every engine step or that a workflow can resume.
     const engineTables=(await pg.raw("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '%workflow%' ORDER BY table_name")).rows;
-    console.log('NP restart inspection counts',JSON.stringify({groups:before.groups.length,orders:before.orders.length,cartOrderLinks:before.links.length,engineTables:engineTables.map((r:any)=>r.table_name)}));
+    console.log('NP restart inspection counts',JSON.stringify({groups:before.groups.length,orders:before.orders.length,cartOrderLinks:before.links.length,engineTables:engineTables.map((r:any)=>r.table_name),storedExecutionCount:storedBefore.length,storedExecutionStates:storedBefore.map((r:any)=>r.state)}));
   }finally{run.mockRestore();await close();await shutdown();}
 });

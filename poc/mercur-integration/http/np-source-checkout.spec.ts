@@ -176,6 +176,19 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     expect(q.data).toHaveLength(0);expect((await cartModule.retrieveCart(cart.id)).completed_at).toBeNull();
     expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
   });
+  it.each(["medusa_session_id","payment_collection_id"])("missing trusted %s stops paid reconciliation for review",async(field:string)=>{
+    const event=await signedPaid("evt_orphan_reference_"+field);state.failCompletion=true;
+    try{expect((await event.send()).status).toBe(503);}finally{state.failCompletion=false;}
+    // Corrupt only the NP projection reference; real sealed financial rows remain.
+    await database().query(`UPDATE np_poc_b305_checkout_authority SET ${field}=$1 WHERE order_id=$2`,["missing_np_fixture",event.orderId]);
+    const run=jest.spyOn(c.resolve(Modules.WORKFLOW_ENGINE),"run");
+    try{
+      expect(await reconcileDuePaidOrders(c)).toEqual([{orderId:event.orderId,status:"review"}]);
+      expect(await reconcileDuePaidOrders(c)).toEqual([]);expect(run).not.toHaveBeenCalled();
+      expect((await database().query("SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1",[event.orderId])).rows).toEqual([{state:"review",stop_reason:"orphan_state"}]);
+      expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+    }finally{run.mockRestore();}
+  });
   it("isolates review and retry failures without exposing error messages",async()=>{
     const calls:string[]=[];
     const result=await reconcileBatch(["partial","bad","good","good"],async id=>{calls.push(id);if(id==="partial")throw Error("NP_PARTIAL_COMPLETION_MANUAL_REVIEW");if(id==="bad")throw Error("private failure");});
