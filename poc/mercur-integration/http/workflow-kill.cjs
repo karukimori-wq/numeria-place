@@ -11,7 +11,7 @@ const checkpoint=join(dir,'checkpoint.json');
 (async()=>{
   if(process.env.NODE_ENV!=='test')throw Error('NP_TEST_ONLY');
   const jest=join(dirname(require.resolve('jest/package.json')),'bin/jest.js');
-  const child=spawn(process.execPath,[jest,'--runInBand','--forceExit','--runTestsByPath','http/np/np-source-checkout.spec.ts','--testNamePattern','real workflow SIGKILL checkpoint after group commit'],{stdio:'inherit',env:{...process.env,TEST_TYPE:'integration:http',NP_WORKFLOW_KILL:'1',NP_WORKFLOW_CHECKPOINT:checkpoint}});
+  const child=spawn(process.execPath,['--experimental-vm-modules','--max-old-space-size=6144',jest,'--runInBand','--forceExit','--runTestsByPath','http/np/np-source-checkout.spec.ts','--testNamePattern','real workflow SIGKILL checkpoint after group commit'],{stdio:'inherit',env:{...process.env,TEST_TYPE:'integration:http',NP_WORKFLOW_KILL:'1',NP_WORKFLOW_CHECKPOINT:checkpoint}});
   const timer=setTimeout(()=>child.kill('SIGKILL'),180000);
   const exit=await new Promise(resolve=>{child.once('error',e=>resolve({error:e}));child.once('exit',(code,signal)=>resolve({code,signal}));});clearTimeout(timer);
   if(exit.signal!=='SIGKILL')throw Error('NP_EXPECTED_SIGKILL');
