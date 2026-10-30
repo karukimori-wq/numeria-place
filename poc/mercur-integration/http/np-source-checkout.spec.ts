@@ -12,7 +12,7 @@ import {reconcilePaidOrder,reconcilePaidOrders,reconcileDuePaidOrders} from "../
 import {reconcileBatch} from "../../src/providers/np-direct/reconciliation-batch";
 import {completionDisposition} from "../../src/providers/np-direct/completion-state";
 import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
-import {readFileSync} from "node:fs";
+import {readFileSync,writeFileSync} from "node:fs";
 import {join} from "node:path";
 import Stripe from "stripe";
 const tables="np_poc_retry_requeue_audit,np_poc_retry_operators,np_poc_retry_history,np_poc_retry_queue,np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
@@ -145,6 +145,20 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
   it("classifies all 18 persisted completion combinations conservatively",()=>{
     for(let g=0;g<=2;g++)for(let o=0;o<=2;o++)for(const done of [false,true])
       expect(completionDisposition(g,o,done)).toBe(g===0&&o===0&&!done?"start":g===1&&o===1&&done?"verify":"review");
+  });
+  (process.env.NP_WORKFLOW_KILL==="1"?it:it.skip)("real workflow SIGKILL checkpoint after group commit",async()=>{
+    const event=await signedPaid("evt_real_workflow_kill");
+    const service=c.resolve(MercurModules.SELLER);
+    const original=service.createOrderGroups.bind(service);
+    jest.spyOn(service,"createOrderGroups").mockImplementation(async(...args:any[])=>{
+      const result=await original(...args);
+      const dbName=(await pg.raw("SELECT current_database() AS name")).rows[0].name;
+      writeFileSync(process.env.NP_WORKFLOW_CHECKPOINT!,JSON.stringify({dbName,cartId:cart.id,orderId:event.orderId}),{mode:0o600});
+      process.kill(process.pid,"SIGKILL");
+      return result;
+    });
+    await event.send();
+    throw Error("NP_WORKFLOW_DID_NOT_TERMINATE");
   });
   it("persisted partial group stops replay before starting another workflow",async()=>{
     const event=await signedPaid("evt_partial_group");state.failCompletion=true;
