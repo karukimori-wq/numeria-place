@@ -1,10 +1,11 @@
 // Separate Jest process; intentionally no integration runner that recreates DBs.
+import {createRequire} from 'node:module';
 import {readFileSync} from 'node:fs';
 import {ContainerRegistrationKeys,Modules} from '@medusajs/framework/utils';
 import {database,close} from '../../src/providers/np-direct/runtime';
 import {reconcilePaidOrder,reconcileDuePaidOrders} from '../../src/providers/np-direct/completion';
 const loaders=require('@medusajs/medusa/loaders/index');
-const express=require('express');
+const express=createRequire(require.resolve('@medusajs/medusa/package.json'))('express');
 jest.setTimeout(180000);
 it('restarts Medusa on surviving DB and standard reconciliation stops partial completion',async()=>{
   const data=JSON.parse(readFileSync(process.env.NP_WORKFLOW_CHECKPOINT!,'utf8'));
