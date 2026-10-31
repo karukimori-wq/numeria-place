@@ -1,3 +1,4 @@
+import {inspectOrphanInventory} from "../../src/providers/np-direct/orphan-inventory";
 import {fork,ChildProcess} from "node:child_process";
 const {chromium}=require("playwright");
 import {installRequeueAudit,requeueReviewedOrder} from "../../src/providers/np-direct/reconciliation-requeue";
@@ -15,7 +16,7 @@ import {removeCartSeal} from "../../src/providers/np-direct/cart-seal";
 import {readFileSync,writeFileSync} from "node:fs";
 import {join} from "node:path";
 import Stripe from "stripe";
-const tables="np_poc_retry_requeue_audit,np_poc_retry_operators,np_poc_retry_history,np_poc_retry_queue,np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
+const tables="np_poc_orphan_resources,np_poc_retry_requeue_audit,np_poc_retry_operators,np_poc_retry_history,np_poc_retry_queue,np_poc_b305_checkout_authority,np_poc_b3_paid_outbox,np_poc_b3_ns_intake,np_poc_b3_webhook_inbox,np_poc_b3_checkout_attempts,np_poc_b3_payment_intents,np_poc_b3_payment_sessions,np_poc_b3_orders,np_poc_b3_listings,np_poc_b3_connect_accounts,np_poc_b3_sellers";
 jest.setTimeout(180000);
 medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur source-backed frozen checkout",()=>{
   let c:any,pg:any,cart:any,buyer:any,other:any,seller:any,offer:any,price:any,item:any,product:any,link:any;
@@ -188,6 +189,21 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
       expect((await database().query("SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1",[event.orderId])).rows).toEqual([{state:"review",stop_reason:"orphan_state"}]);
       expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
     }finally{run.mockRestore();}
+  });
+  it("reverse inventory finds unreferenced NP sessions and sealed collections without repair",async()=>{
+    const r=await post();expect(r.status).toBe(200);
+    expect((await inspectOrphanInventory(c)).findings).toEqual([]);
+    await database().query("DELETE FROM np_poc_b305_checkout_authority WHERE order_id=$1",[r.data.order_id]);
+    const engine=jest.spyOn(c.resolve(Modules.WORKFLOW_ENGINE),"run");
+    try{
+      const first=await inspectOrphanInventory(c,"",1);expect(first.findings).toHaveLength(1);expect(first.findings[0].kind).toBe("collection");
+      const second=await inspectOrphanInventory(c,first.nextCursor!,1);expect(second.findings).toHaveLength(1);expect(second.findings[0].kind).toBe("session");
+      expect((await inspectOrphanInventory(c,second.nextCursor!,1)).findings).toEqual([]);
+      await inspectOrphanInventory(c);
+      expect((await database().query("SELECT kind,state,reason FROM np_poc_orphan_resources ORDER BY kind")).rows).toEqual([{kind:"collection",state:"review",reason:"unmatched_authority"},{kind:"session",state:"review",reason:"unmatched_authority"}]);
+      expect(engine).not.toHaveBeenCalled();expect(state.calls.filter(x=>x.method==="create")).toHaveLength(1);
+      await expect(inspectOrphanInventory(c,"",101)).rejects.toThrow("NP_INVENTORY_LIMIT");
+    }finally{engine.mockRestore();}
   });
   it("isolates review and retry failures without exposing error messages",async()=>{
     const calls:string[]=[];
