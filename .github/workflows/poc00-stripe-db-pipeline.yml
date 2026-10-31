@@ -1,0 +1,43 @@
+name: PoC00-B2 Stripe verified events + Postgres transaction (no API calls)
+on:
+  pull_request:
+    paths:
+      - 'poc/stripe-direct/scripts/test-stripe-sdk-pg-inbox.cjs'
+      - '.github/workflows/poc00-stripe-db-pipeline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sdk-pg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mercur
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mercur
+      NODE_PATH: /tmp/np-poc-sdk/node_modules
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated real SDK and PostgreSQL driver (no keys)
+        run: npm install --prefix /tmp/np-poc-sdk --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0 pg@8.16.3
+      - name: Verify real Stripe local signature and PostgreSQL atomic inbox behavior
+        run: node poc/stripe-direct/scripts/test-stripe-sdk-pg-inbox.cjs
+      - name: State explicit scope
+        if: always()
+        run: |
+          echo 'Real stripe-node crypto verifier + temporary PostgreSQL transaction test only.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT live Stripe Checkout or refunds; NOT Mercur runtime Direct integration.' >> "$GITHUB_STEP_SUMMARY"
