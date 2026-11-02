@@ -149,11 +149,11 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
   });
   (process.env.NP_WORKFLOW_KILL==="1"?it:it.skip)("real workflow SIGKILL checkpoint at persisted boundary",async()=>{
     const boundary=process.env.NP_WORKFLOW_BOUNDARY??"group";
-    if(!["group","order","link"].includes(boundary))throw Error("NP_INVALID_KILL_BOUNDARY");
+    if(!["group","order","link","ack"].includes(boundary))throw Error("NP_INVALID_KILL_BOUNDARY");
     const event=await signedPaid("evt_real_workflow_kill");
     const terminate=async()=>{
       const dbName=(await pg.raw("SELECT current_database() AS name")).rows[0].name;
-      writeFileSync(process.env.NP_WORKFLOW_CHECKPOINT!,JSON.stringify({dbName,cartId:cart.id,orderId:event.orderId,boundary}),{mode:0o600});
+      writeFileSync(process.env.NP_WORKFLOW_CHECKPOINT!,JSON.stringify({dbName,cartId:cart.id,orderId:event.orderId,boundary,offlineIntent:boundary==="ack"?(()=>{const p=[...state.intents.values()][0];return {id:p.id,status:p.status,amount:p.amount,currency:p.currency,metadata:{session_id:p.metadata.session_id,np_order_id:p.metadata.np_order_id,np_seller_id:p.metadata.np_seller_id}};})():undefined}),{mode:0o600});
       process.kill(process.pid,"SIGKILL");
     };
     const service=c.resolve(MercurModules.SELLER),original=service.createOrderGroups.bind(service);
@@ -173,6 +173,14 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
         const result=await create(...args);
         const definitions=Array.isArray(args[0])?args[0]:[args[0]];
         if(definitions.some((d:any)=>d?.[Modules.CART]?.cart_id===cart.id&&d?.[Modules.ORDER]?.order_id))await terminate();
+        return result;
+      });
+    }
+    if(boundary==="ack"){
+      const engine=c.resolve(Modules.WORKFLOW_ENGINE),run=engine.run.bind(engine);
+      jest.spyOn(engine,"run").mockImplementation(async(...args:any[])=>{
+        const result=await run(...args);
+        if(args[0]==="complete-cart-with-split-orders"&&!result.errors?.length)await terminate();
         return result;
       });
     }

@@ -2,7 +2,7 @@
 import {createRequire} from 'node:module';
 import {readFileSync} from 'node:fs';
 import {ContainerRegistrationKeys,Modules} from '@medusajs/framework/utils';
-import {database,close} from '../../src/providers/np-direct/runtime';
+import {database,close,state} from '../../src/providers/np-direct/runtime';
 import {reconcilePaidOrder,reconcileDuePaidOrders} from '../../src/providers/np-direct/completion';
 const loaders=require('@medusajs/medusa/loaders/index');
 const express=createRequire(require.resolve('@medusajs/medusa/package.json'))('express');
@@ -21,6 +21,9 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
     const snapshot=async()=>({
       groups:await pg('order_group').where({cart_id:data.cartId}).select('id'),
       orders:await pg('order').select('id').orderBy('id'),
+      sessions:await pg('payment_session').select('id').orderBy('id'),
+      collections:await pg('payment_collection').select('id').orderBy('id'),
+      payments:(await container.resolve(ContainerRegistrationKeys.QUERY).graph({entity:'order',fields:['id','payment_collections.payments.id','payment_collections.payments.captures.id'],filters:{id:data.orderIds}})).data,
       links:(await container.resolve(ContainerRegistrationKeys.QUERY).graph({entity:'order_cart',fields:['order.id'],filters:{cart_id:data.cartId}})).data,
     });
     // Read only execution identity/state metadata; never execution/context JSON.
@@ -38,14 +41,36 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
 
     const before=await snapshot();expect(before.orders.map((o:any)=>o.id)).toEqual(data.orderIds);expect(before.groups).toHaveLength(1);
     if(data.boundary!=="group")expect(before.orders).toHaveLength(1);
-    expect(before.links).toHaveLength(data.boundary==="link"?1:0);
-    expect((await container.resolve(Modules.CART).retrieveCart(data.cartId)).completed_at).toBeNull();
-    await expect(reconcilePaidOrder(data.orderId,container,true)).rejects.toThrow('NP_PARTIAL_COMPLETION_MANUAL_REVIEW');
-    expect(await reconcileDuePaidOrders(container)).toEqual([{orderId:data.orderId,status:'review'}]);
-    expect(await reconcileDuePaidOrders(container)).toEqual([]);
+    expect(before.links).toHaveLength(["link","ack"].includes(data.boundary)?1:0);
+    const completed=(await container.resolve(Modules.CART).retrieveCart(data.cartId)).completed_at;
+    expect(!!completed).toBe(data.boundary==="ack");
+    const ledger=()=>pg('np_poc_completion').where({cart_id:data.cartId}).first();
+    expect((await ledger()).state).toBe('pending');
+    if(data.boundary==="ack"){
+      // The restarted offline transport has no memory. Refuse to finalize until
+      // an explicit synthetic remote-state fixture is restored, never trust NP
+      // paid or completed_at alone. This is not a real Stripe API retrieval.
+      await expect(reconcilePaidOrder(data.orderId,container,true)).rejects.toThrow('UNKNOWN_OFFLINE_INTENT');
+      expect((await ledger()).state).toBe('pending');
+      const p=data.offlineIntent;
+      expect(p?.status).toBe('succeeded');expect(p?.metadata?.np_order_id).toBe(data.orderId);
+      state.intents.set(p.id,p);state.calls.length=0;
+      const result=await reconcilePaidOrder(data.orderId,container,true);
+      expect(result?.orderId).toBe(data.orderIds[0]);
+      expect((await ledger()).state).toBe('completed');
+      expect((await ledger()).medusa_order_id).toBe(data.orderIds[0]);
+      expect(await reconcileDuePaidOrders(container)).toEqual([{orderId:data.orderId,status:'completed'}]);
+      expect(await reconcileDuePaidOrders(container)).toEqual([]);
+      expect(state.calls.length).toBeGreaterThan(0);
+      expect(state.calls.every(call=>call.method==='retrieve'&&call.account==='acct_Source123')).toBe(true);
+    }else{
+      await expect(reconcilePaidOrder(data.orderId,container,true)).rejects.toThrow('NP_PARTIAL_COMPLETION_MANUAL_REVIEW');
+      expect(await reconcileDuePaidOrders(container)).toEqual([{orderId:data.orderId,status:'review'}]);
+      expect(await reconcileDuePaidOrders(container)).toEqual([]);
+    }
     expect(run).not.toHaveBeenCalled();expect(await snapshot()).toEqual(before);
     expect(await executionMetadata()).toEqual(storedBefore);expect(await stepMetadata()).toEqual(stepsBefore);
-    expect((await database().query('SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1',[data.orderId])).rows).toEqual([{state:'review',stop_reason:'partial_completion'}]);
+    expect((await database().query('SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1',[data.orderId])).rows).toEqual([{state:data.boundary==='ack'?'completed':'review',stop_reason:data.boundary==='ack'?null:'partial_completion'}]);
     // Inspect engine persistence availability without assuming that SIGKILL
     // synchronously flushed every engine step or that a workflow can resume.
     const engineTables=(await pg.raw("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '%workflow%' ORDER BY table_name")).rows;

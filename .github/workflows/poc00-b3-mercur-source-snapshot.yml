@@ -110,6 +110,7 @@ jobs:
           node http/np/workflow-kill.cjs group
           node http/np/workflow-kill.cjs order
           node http/np/workflow-kill.cjs link
+          node http/np/workflow-kill.cjs ack
       - name: Upload operator review screenshots
         if: always()
         uses: actions/upload-artifact@v4

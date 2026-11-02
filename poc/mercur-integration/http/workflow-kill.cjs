@@ -9,7 +9,7 @@ const checkpoint=join(dir,'checkpoint.json');
 (async()=>{
   if(process.env.NODE_ENV!=='test')throw Error('NP_TEST_ONLY');
   const boundary=process.argv[2]??'group';
-  if(!['group','order','link'].includes(boundary))throw Error('NP_INVALID_KILL_BOUNDARY');
+  if(!['group','order','link','ack'].includes(boundary))throw Error('NP_INVALID_KILL_BOUNDARY');
   const jest=join(dirname(require.resolve('jest/package.json')),'bin/jest.js');
   const child=spawn(process.execPath,['--experimental-vm-modules','--max-old-space-size=6144',jest,'--runInBand','--forceExit','--runTestsByPath','http/np/np-source-checkout.spec.ts','--testNamePattern','real workflow SIGKILL checkpoint at persisted boundary'],{stdio:'inherit',env:{...process.env,TEST_TYPE:'integration:http',NP_WORKFLOW_KILL:'1',NP_WORKFLOW_BOUNDARY:boundary,NP_WORKFLOW_CHECKPOINT:checkpoint}});
   const timer=setTimeout(()=>child.kill('SIGKILL'),180000);
@@ -29,7 +29,9 @@ const checkpoint=join(dir,'checkpoint.json');
     const cart=await medusa.query('SELECT completed_at FROM cart WHERE id=$1',[data.cartId]);
     // At least a persisted group exists. Even if concurrent order creation committed,
     // an unfinished cart must conservatively stop before another creation workflow.
-    if(cart.rowCount!==1||cart.rows[0].completed_at)throw Error('NP_EXPECTED_INCOMPLETE_CART');
+    if(cart.rowCount!==1||!!cart.rows[0].completed_at!==(boundary==='ack'))throw Error('NP_UNEXPECTED_CART_COMPLETION');
+    const ledger=await medusa.query('SELECT state FROM np_poc_completion WHERE cart_id=$1',[data.cartId]);
+    if(ledger.rows[0]?.state!=='pending')throw Error('NP_EXPECTED_PENDING_LEDGER');
     const paid=await np.query('SELECT state FROM np_poc_b3_orders WHERE order_id=$1',[data.orderId]);
     if(paid.rows[0]?.state!=='paid')throw Error('NP_PAID_COMMIT_LOST');
     data.orderIds=(await medusa.query('SELECT id FROM "order" ORDER BY id')).rows.map(r=>r.id);
@@ -39,6 +41,6 @@ const checkpoint=join(dir,'checkpoint.json');
     const recoveryTimer=setTimeout(()=>recovery.kill('SIGKILL'),180000);
     const recoveryCode=await new Promise(resolve=>{recovery.once('error',()=>resolve(-1));recovery.once('exit',code=>resolve(code));});clearTimeout(recoveryTimer);
     if(recoveryCode!==0)throw Error('NP_RESTART_RECONCILIATION_FAILED');
-    console.log('PASS real workflow SIGKILL boundary='+boundary+': committed resources survive; restarted standard reconciliation enters review without new workflow.');
+    console.log('PASS real workflow SIGKILL boundary='+boundary+': committed resources survive; restarted standard reconciliation verifies persisted boundary without new workflow.');
   }finally{await medusa.end();await np.end();}
 })().catch(()=>{console.error('FAIL real workflow SIGKILL verification (details intentionally omitted)');process.exitCode=1;}).finally(()=>rmSync(dir,{recursive:true,force:true}));
