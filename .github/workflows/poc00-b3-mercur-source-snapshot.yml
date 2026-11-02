@@ -106,7 +106,10 @@ jobs:
         run: bun run test:integration:http -- --runTestsByPath http/np/np-direct-runtime.spec.ts http/np/np-buyer-checkout.spec.ts http/np/np-source-checkout.spec.ts
       - name: Kill real workflow after committed order group and inspect from fresh process
         working-directory: mercur/integration-tests
-        run: node http/np/workflow-kill.cjs
+        run: |
+          node http/np/workflow-kill.cjs group
+          node http/np/workflow-kill.cjs order
+          node http/np/workflow-kill.cjs link
       - name: Upload operator review screenshots
         if: always()
         uses: actions/upload-artifact@v4

@@ -37,6 +37,8 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
     const stepsBefore=await stepMetadata();
 
     const before=await snapshot();expect(before.orders.map((o:any)=>o.id)).toEqual(data.orderIds);expect(before.groups).toHaveLength(1);
+    if(data.boundary!=="group")expect(before.orders).toHaveLength(1);
+    expect(before.links).toHaveLength(data.boundary==="link"?1:0);
     expect((await container.resolve(Modules.CART).retrieveCart(data.cartId)).completed_at).toBeNull();
     await expect(reconcilePaidOrder(data.orderId,container,true)).rejects.toThrow('NP_PARTIAL_COMPLETION_MANUAL_REVIEW');
     expect(await reconcileDuePaidOrders(container)).toEqual([{orderId:data.orderId,status:'review'}]);
@@ -47,6 +49,6 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
     // Inspect engine persistence availability without assuming that SIGKILL
     // synchronously flushed every engine step or that a workflow can resume.
     const engineTables=(await pg.raw("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '%workflow%' ORDER BY table_name")).rows;
-    console.log('NP restart inspection counts',JSON.stringify({groups:before.groups.length,orders:before.orders.length,cartOrderLinks:before.links.length,engineTables:engineTables.map((r:any)=>r.table_name),storedStepCount:stepsBefore.length,storedStepInvokingCount:stepsBefore.filter((s:any)=>s.invoke_state==="invoking").length,storedStepDoneCount:stepsBefore.filter((s:any)=>s.invoke_state==="done").length,storedExecutionCount:storedBefore.length,storedExecutionStates:storedBefore.map((r:any)=>r.state)}));
+    console.log('NP restart inspection counts',JSON.stringify({boundary:data.boundary,groups:before.groups.length,orders:before.orders.length,cartOrderLinks:before.links.length,engineTables:engineTables.map((r:any)=>r.table_name),storedStepCount:stepsBefore.length,storedStepInvokingCount:stepsBefore.filter((s:any)=>s.invoke_state==="invoking").length,storedStepDoneCount:stepsBefore.filter((s:any)=>s.invoke_state==="done").length,storedExecutionCount:storedBefore.length,storedExecutionStates:storedBefore.map((r:any)=>r.state)}));
   }finally{run.mockRestore();await close();await shutdown();}
 });

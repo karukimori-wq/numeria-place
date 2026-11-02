@@ -147,19 +147,36 @@ medusaIntegrationTestRunner({testSuite:({api,getContainer})=>{describe("Mercur s
     for(let g=0;g<=2;g++)for(let o=0;o<=2;o++)for(const done of [false,true])
       expect(completionDisposition(g,o,done)).toBe(g===0&&o===0&&!done?"start":g===1&&o===1&&done?"verify":"review");
   });
-  (process.env.NP_WORKFLOW_KILL==="1"?it:it.skip)("real workflow SIGKILL checkpoint after group commit",async()=>{
+  (process.env.NP_WORKFLOW_KILL==="1"?it:it.skip)("real workflow SIGKILL checkpoint at persisted boundary",async()=>{
+    const boundary=process.env.NP_WORKFLOW_BOUNDARY??"group";
+    if(!["group","order","link"].includes(boundary))throw Error("NP_INVALID_KILL_BOUNDARY");
     const event=await signedPaid("evt_real_workflow_kill");
-    const service=c.resolve(MercurModules.SELLER);
-    const original=service.createOrderGroups.bind(service);
-    jest.spyOn(service,"createOrderGroups").mockImplementation(async(...args:any[])=>{
-      const result=await original(...args);
+    const terminate=async()=>{
       const dbName=(await pg.raw("SELECT current_database() AS name")).rows[0].name;
-      writeFileSync(process.env.NP_WORKFLOW_CHECKPOINT!,JSON.stringify({dbName,cartId:cart.id,orderId:event.orderId}),{mode:0o600});
+      writeFileSync(process.env.NP_WORKFLOW_CHECKPOINT!,JSON.stringify({dbName,cartId:cart.id,orderId:event.orderId,boundary}),{mode:0o600});
       process.kill(process.pid,"SIGKILL");
-      return result;
+    };
+    const service=c.resolve(MercurModules.SELLER),original=service.createOrderGroups.bind(service);
+    let groupReady!:()=>void;const committedGroup=new Promise<void>(resolve=>{groupReady=resolve;});
+    jest.spyOn(service,"createOrderGroups").mockImplementation(async(...args:any[])=>{
+      const result=await original(...args);groupReady();if(boundary==="group")await terminate();return result;
     });
-    await event.send();
-    throw Error("NP_WORKFLOW_DID_NOT_TERMINATE");
+    if(boundary==="order"){
+      const orderService=c.resolve(Modules.ORDER),create=orderService.createOrders.bind(orderService);
+      jest.spyOn(orderService,"createOrders").mockImplementation(async(...args:any[])=>{
+        const result=await create(...args);await committedGroup;await terminate();return result;
+      });
+    }
+    if(boundary==="link"){
+      const create=link.create.bind(link);
+      jest.spyOn(link,"create").mockImplementation(async(...args:any[])=>{
+        const result=await create(...args);
+        const definitions=Array.isArray(args[0])?args[0]:[args[0]];
+        if(definitions.some((d:any)=>d?.[Modules.CART]?.cart_id===cart.id&&d?.[Modules.ORDER]?.order_id))await terminate();
+        return result;
+      });
+    }
+    await event.send();throw Error("NP_WORKFLOW_DID_NOT_TERMINATE");
   });
   it("persisted partial group stops replay before starting another workflow",async()=>{
     const event=await signedPaid("evt_partial_group");state.failCompletion=true;
