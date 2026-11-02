@@ -1,6 +1,6 @@
 # B3-05c-3q: bounded recovery acceptance and worker ownership
 
-Date: 2026-11-02. Disposable pinned Mercur overlay only. Validation pending.
+Date: 2026-11-02. Disposable pinned Mercur overlay only. Validation PASS within the scope below.
 
 ## Accepted offline boundaries
 
@@ -29,6 +29,9 @@ The NP advisory lock, queue lease and token fence protect NP reconciliation. The
 - [Pinned withMercur](https://github.com/mercurjs/mercur/blob/9fe557067193e0ad4dd3b7fd37e212f0b352ab3c/packages/core/src/with-mercur.ts): passes projectConfig through defineConfig.
 - [Medusa 2.21.2 Redis engine storage](https://github.com/medusajs/medusa/blob/v2.21.2/packages/modules/workflow-engine-redis/src/utils/workflow-orchestrator-storage.ts): onApplicationStart creates retry/step-timeout/transaction-timeout consumers when isWorkerMode; executeTransaction calls orchestrator.run with stored transaction identity. This establishes a separate execution path when that module is configured; it does not demonstrate that the current test app uses Redis workflow storage or that every killed synchronous execution will automatically resume. No such claim is made.
 
+- [Medusa defineConfig](https://github.com/medusajs/medusa/blob/v2.21.2/packages/core/utils/src/common/define-config.ts): default modules and cloud modules differ; REDIS_URL alone does not establish the selected engine.
+- [In-memory engine storage](https://github.com/medusajs/medusa/blob/v2.21.2/packages/modules/workflow-engine-inmemory/src/utils/workflow-orchestrator-storage.ts): retry/timeout maps are process memory; onApplicationStart starts expiration cleanup, while scheduleRetry installs timers that call the orchestrator. Server mode is not a universal timer prohibition. Reading this source does not replace testing the effective configured module or durable recovery.
+
 ## Gates still open
 
 1. Dedicated isolated worker-mode experiment: identify actual configured engine implementation; enumerate durable retry jobs and transaction identities without payload logging; restart against each killed DB; race worker recovery with NP lease ownership; compare actual payment/order/link side effects. Define a single owner before enabling consumers. No arbitrary engine resume/cancel is authorized by this report.
@@ -41,4 +44,4 @@ Operator UI remains paused at its checkpoint. No production migration/adoption, 
 ## Changes and validation
 
 Files: server-only.cjs, server-only.test.cjs, install-direct-runtime.mjs, workflow-restart.spec.ts, source-snapshot workflow, this report.
-Local: six fresh-process policy cases PASS; installer syntax PASS. Full fixed build/typecheck and four real SIGKILL/restart regressions pending Actions. PR #2 remains Draft.
+Local: six fresh-process policy cases PASS; installer syntax PASS. Tested code b826e0ad195d55d93e53d2a4cceafbdb5215b6de. [Actions 41462311691](https://github.com/karukimori-wq/numeria-place/actions/runs/41462311691): fixed build/typecheck PASS; 6 fresh-process policy cases PASS; normal 3 suites / 51 passed + 1 skipped; four independent real SIGKILL/restarted-Medusa suites each 1/1 PASS, all four supervisor markers PASS. Final job success and logs checked. Loaded configuration is server in every restart. No replacement workflow; prior partial/recovered outcomes and resource invariance preserved. Other 13 workflows at this tested SHA also success. PR #2 remains Draft. This later report update adds sources/evidence only, no runtime change.
