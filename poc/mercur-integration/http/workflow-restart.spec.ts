@@ -13,6 +13,7 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
   if(process.env.NODE_ENV!=='test'||!['localhost','127.0.0.1'].includes(target.hostname)||target.pathname!=='/'+data.dbName)throw Error('NP_RESTART_TEST_DB_REQUIRED');
   await loaders.initializeContainer(process.cwd(),{skipDbConnection:true});
   const {container,shutdown}=await loaders.default({directory:process.cwd(),expressApp:express(),skipLoadingEntryPoints:true});
+  expect(container.resolve(ContainerRegistrationKeys.CONFIG_MODULE).projectConfig.workerMode).toBe('server');
   const pg=container.resolve(ContainerRegistrationKeys.PG_CONNECTION);
   const engine=container.resolve(Modules.WORKFLOW_ENGINE);
   const run=jest.spyOn(engine,'run');

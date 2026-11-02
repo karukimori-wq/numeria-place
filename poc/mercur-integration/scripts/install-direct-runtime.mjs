@@ -16,6 +16,10 @@ cpSync(join(np,"poc/mercur-integration/api/route.ts"),join(api,"route.ts"));
 cpSync(join(np,"poc/mercur-integration/api/middlewares.ts"),join(root,"integration-tests/src/api/middlewares.ts"));
 cpSync(join(np,"poc/mercur-integration/http/np-direct-runtime.spec.ts"),join(root,"integration-tests/http/np/np-direct-runtime.spec.ts"));
 const config=join(root,"integration-tests/medusa-config.ts");let s=readFileSync(config,"utf8");
+const workerAnchor="  projectConfig: {";
+if(!s.includes(workerAnchor))throw Error("NP_WORKER_CONFIG_ANCHOR_CHANGED");
+cpSync(join(np,"poc/mercur-integration/scripts/server-only.cjs"),join(root,"integration-tests/np-server-only.cjs"));
+s=s.replace(workerAnchor,workerAnchor+"\n    workerMode: require('./np-server-only.cjs')(process.env),");
 s=s.replace("  modules: [",`  modules: [
     { resolve: '@medusajs/medusa/payment', options: {providers:[{
       resolve:'./src/providers/np-direct',id:'np-direct',options:{}

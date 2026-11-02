@@ -83,6 +83,8 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         working-directory: mercur
         run: bun install --frozen-lockfile
+      - name: Verify server-only startup policy in fresh processes
+        run: node np/poc/mercur-integration/scripts/server-only.test.cjs
       - name: Install pinned NP runtime overlay before building changed upstream sources
         run: node np/poc/mercur-integration/scripts/install-direct-runtime.mjs mercur np
       - name: Build patched pinned Mercur workspace
