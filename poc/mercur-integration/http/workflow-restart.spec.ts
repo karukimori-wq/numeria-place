@@ -18,6 +18,15 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
   const engine=container.resolve(Modules.WORKFLOW_ENGINE);
   const run=jest.spyOn(engine,'run');
   try{
+    // Pinned internal inspection: project only type labels, never dump services,
+    // connection options, stored workflow payloads or storage map contents.
+    const orchestrator=(engine as any).workflowOrchestratorService_;
+    const storage=orchestrator?.inMemoryDistributedTransactionStorage_;
+    expect(storage?.constructor?.name).toBe('InMemoryDistributedTransactionStorage');
+    expect(orchestrator?.redisDistributedTransactionStorage_).toBeUndefined();
+    const configured=container.resolve(ContainerRegistrationKeys.CONFIG_MODULE).modules[Modules.WORKFLOW_ENGINE];
+    expect(configured.resolve).toBe('@medusajs/medusa/workflow-engine-inmemory');
+    console.log('NP engine identity',JSON.stringify({boundary:data.boundary,mode:'server',module:'@medusajs/medusa/workflow-engine-inmemory',storage:'InMemoryDistributedTransactionStorage'}));
     expect((await pg.raw('SELECT current_database() AS name')).rows[0].name).toBe(data.dbName);
     const snapshot=async()=>({
       groups:await pg('order_group').where({cart_id:data.cartId}).select('id'),
