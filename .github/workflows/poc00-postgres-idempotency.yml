@@ -1,0 +1,40 @@
+name: PoC00 PostgreSQL transaction idempotency (no real payments)
+on:
+  pull_request:
+    paths:
+      - 'poc/mercur-runtime/**'
+      - '.github/workflows/poc00-postgres-idempotency.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres-transaction-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mercur
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mercur
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+      - name: Verify transaction and unique constraints against real PostgreSQL
+        run: bun poc/mercur-runtime/test-postgres-idempotency.mjs
+      - name: Define scope
+        if: always()
+        run: |
+          echo "Live ephemeral Postgres transaction test, but no Mercur runtime or Stripe calls." >> "$GITHUB_STEP_SUMMARY"
+          echo "No production credentials or data; in-memory and Stripe validation code is a separate gate." >> "$GITHUB_STEP_SUMMARY"
