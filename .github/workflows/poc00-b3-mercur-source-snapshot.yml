@@ -100,7 +100,9 @@ jobs:
           done
       - name: Verify isolated Redis storage retry across process kill
         working-directory: mercur/integration-tests
-        run: node http/np/redis-retry-process.cjs
+        run: |
+          node http/np/redis-retry-process.cjs
+          NP_REDIS_ACK_CASE=1 node http/np/redis-retry-process.cjs
       - name: Install Chromium for operator review browser verification
         run: node "$RUNNER_TEMP/np-runtime-deps/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Typecheck registered NP Payment provider against pinned Medusa 2.21.2
