@@ -23,7 +23,7 @@ async function child(){
    await redis.incr(prefix+':callbacks');
  }});
  if(process.argv[2]==='produce'){
-   await storage.scheduleRetry({modelId:'np-synthetic-retry',transactionId:'np-synthetic-transaction',getFlow:()=>({metadata:{}})},{id:'np-step'},Date.now(),2);
+   await storage.scheduleRetry({modelId:'np-synthetic-retry',transactionId:'np-synthetic-transaction',getFlow:()=>({metadata:{}})},{id:'np-step',attempts:0,isCompensating:()=>false},Date.now(),2);
    process.send('persisted');await new Promise(()=>{});
  }else{
    await storage.onApplicationStart();process.send('started');await new Promise(()=>{});
