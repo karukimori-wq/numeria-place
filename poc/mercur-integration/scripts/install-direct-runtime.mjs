@@ -54,6 +54,7 @@ cpSync(join(np,"poc/mercur-integration/http/np-source-checkout.spec.ts"),join(ro
 cpSync(join(np,"poc/mercur-integration/http/retry-process.cjs"),join(root,"integration-tests/http/np/retry-process.cjs"));
 cpSync(join(np,"poc/mercur-integration/http/workflow-kill.cjs"),join(root,"integration-tests/http/np/workflow-kill.cjs"));
 cpSync(join(np,"poc/mercur-integration/http/workflow-restart.spec.ts"),join(root,"integration-tests/http/np/workflow-restart.spec.ts"));
+cpSync(join(np,"poc/mercur-integration/http/redis-retry-process.cjs"),join(root,"integration-tests/http/np/redis-retry-process.cjs"));
 const opsApi=join(root,"integration-tests/src/api/np-ops/retries/[order_id]/requeue");mkdirSync(opsApi,{recursive:true});
 cpSync(join(np,"poc/mercur-integration/api/requeue-route.ts"),join(opsApi,"route.ts"));
 const inspectApi=join(root,"integration-tests/src/api/np-ops/retries/[order_id]");mkdirSync(inspectApi,{recursive:true});

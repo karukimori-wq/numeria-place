@@ -113,6 +113,9 @@ jobs:
           node http/np/workflow-kill.cjs order
           node http/np/workflow-kill.cjs link
           node http/np/workflow-kill.cjs ack
+      - name: Verify isolated Redis storage retry across process kill
+        working-directory: mercur/integration-tests
+        run: node http/np/redis-retry-process.cjs
       - name: Upload operator review screenshots
         if: always()
         uses: actions/upload-artifact@v4
