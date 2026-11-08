@@ -98,6 +98,9 @@ jobs:
             rm -rf "mercur/integration-tests/node_modules/$package"
             ln -s "$RUNNER_TEMP/np-runtime-deps/node_modules/$package" "mercur/integration-tests/node_modules/$package"
           done
+      - name: Verify isolated Redis storage retry across process kill
+        working-directory: mercur/integration-tests
+        run: node http/np/redis-retry-process.cjs
       - name: Install Chromium for operator review browser verification
         run: node "$RUNNER_TEMP/np-runtime-deps/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Typecheck registered NP Payment provider against pinned Medusa 2.21.2
@@ -113,9 +116,6 @@ jobs:
           node http/np/workflow-kill.cjs order
           node http/np/workflow-kill.cjs link
           node http/np/workflow-kill.cjs ack
-      - name: Verify isolated Redis storage retry across process kill
-        working-directory: mercur/integration-tests
-        run: node http/np/redis-retry-process.cjs
       - name: Upload operator review screenshots
         if: always()
         uses: actions/upload-artifact@v4

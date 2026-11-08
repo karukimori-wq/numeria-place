@@ -17,6 +17,7 @@ const connection=()=>new Redis(url.toString(),{maxRetriesPerRequest:null});
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function child(){
  const redis=connection(),worker=connection();
+ await Promise.all([redis,worker].map(c=>c.status==='ready'?Promise.resolve():new Promise((resolve,reject)=>{c.once('ready',resolve);c.once('error',reject); })));
  const storage=new RedisDistributedTransactionStorage({workflowExecutionService:{delete:async()=>{}},redisConnection:redis,redisWorkerConnection:worker,redisQueueName:'np-retry',redisJobQueueName:'np-schedule',redisMainQueueOptions:{prefix},redisMainWorkerOptions:{prefix},redisJobQueueOptions:{prefix},redisJobWorkerOptions:{prefix},redisCleanerQueueOptions:{prefix},redisCleanerWorkerOptions:{prefix},logger:{debug(){},info(){},warn(){},error(){throw Error('NP_ENGINE_ERROR');}},isWorkerMode:process.argv[2]==='consume'});
  storage.setWorkflowOrchestratorService({run:async(id,options)=>{
    assert.equal(id,'np-synthetic-retry');assert.equal(options.transactionId,'np-synthetic-transaction');
@@ -48,5 +49,5 @@ async function parent(){
    let cursor='0';do{const result=await redis.scan(cursor,'MATCH',prefix+':*','COUNT',100);cursor=result[0];if(result[1].length)await redis.del(...result[1]);}while(cursor!=='0');await redis.quit();
  }
 }
-if(process.argv[2])child().catch(()=>{console.error('FAIL Redis storage child');process.exit(1);});
+if(process.argv[2])child().catch(e=>{console.error('FAIL Redis storage child',e.name, String(e.message).includes('Custom Id cannot contain')?'INVALID_JOB_ID':String(e.message).includes('is not a function')?'INVALID_PINNED_INTERFACE':String(e.message).includes('maxRetriesPerRequest')?'REDIS_RETRY_OPTIONS':'UNCLASSIFIED');process.exit(1);});
 else parent().catch(()=>{console.error('FAIL Redis storage process experiment');process.exitCode=1;});
