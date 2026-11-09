@@ -1,0 +1,53 @@
+name: PoC00-B3-05a pinned Mercur payout fail-closed source audit
+on:
+  pull_request:
+    paths:
+      - 'poc/mercur-direct/scripts/**'
+      - '.github/workflows/poc00-b3-mercur-payout-guard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pinned-payout-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: np
+      - uses: actions/checkout@v4
+        with:
+          repository: mercurjs/mercur
+          ref: 9fe557067193e0ad4dd3b7fd37e212f0b352ab3c
+          path: mercur
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply SHA-pinned fail-closed payout guard in temporary Mercur checkout
+        run: node np/poc/mercur-direct/scripts/apply-direct-payout-guard.cjs mercur
+      - name: Audit exact Mercur source entrypoints and guard ordering
+        run: |
+          node np/poc/mercur-direct/scripts/audit-mercur-direct-gates.cjs mercur
+          git -C mercur diff --check
+          git -C mercur diff -- packages/core/src/modules/payout/services/payout-module-service.ts
+      - name: 'Negative control: source audit MUST fail if guard removed'
+        run: |
+          cp mercur/packages/core/src/modules/payout/services/payout-module-service.ts /tmp/np-payout-patched.ts
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('mercur/packages/core/src/modules/payout/services/payout-module-service.ts')
+          s=p.read_text()
+          s=s.replace('process.env.NP_DIRECT_CHARGES_NO_MERCUR_PAYOUT === "true"','false')
+          p.write_text(s)
+          PY
+          if node np/poc/mercur-direct/scripts/audit-mercur-direct-gates.cjs mercur; then
+            echo 'ERROR: audit accepted missing guard'; exit 1
+          fi
+          cp /tmp/np-payout-patched.ts mercur/packages/core/src/modules/payout/services/payout-module-service.ts
+          node np/poc/mercur-direct/scripts/audit-mercur-direct-gates.cjs mercur
+      - name: State scope and unresolved integration
+        if: always()
+        run: |
+          echo 'Only patched disposable pinned Mercur checkout. NO build, HTTP server, Stripe API, payout or transfer executed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The direct payment provider and signed DB webhook are NOT registered into Mercur runtime.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Runtime integration, disabling all other payout entrypoints, and live Connect Test Mode remain required.' >> "$GITHUB_STEP_SUMMARY"

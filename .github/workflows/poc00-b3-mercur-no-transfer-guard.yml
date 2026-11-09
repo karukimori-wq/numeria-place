@@ -1,0 +1,36 @@
+name: PoC00-B3-05a pinned Mercur no-Transfer source guard
+on:
+  pull_request:
+    paths:
+      - 'poc/mercur-direct/scripts/*mercur-no-transfer-guard.mjs'
+      - '.github/workflows/poc00-b3-mercur-no-transfer-guard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pinned-mercur-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: np
+      - uses: actions/checkout@v4
+        with:
+          repository: mercurjs/mercur
+          ref: 9fe557067193e0ad4dd3b7fd37e212f0b352ab3c
+          path: mercur
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify pinned upstream commit
+        run: test "$(git -C mercur rev-parse HEAD)" = '9fe557067193e0ad4dd3b7fd37e212f0b352ab3c'
+      - name: Apply fail-closed payout module overlay in disposable Mercur checkout
+        run: node np/poc/mercur-direct/scripts/apply-mercur-no-transfer-guard.mjs mercur
+      - name: Assert exact upstream payout boundary and no accidental edits
+        run: node np/poc/mercur-direct/scripts/verify-mercur-no-transfer-guard.mjs mercur
+      - name: Record honest scope
+        if: always()
+        run: |
+          echo 'B3-05a tests the pinned Mercur source-level fail-closed payout boundary only.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No Mercur build/HTTP tests, no Payment Provider registration, no real Stripe API or Transfer.' >> "$GITHUB_STEP_SUMMARY"

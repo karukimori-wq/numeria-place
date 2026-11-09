@@ -1,0 +1,55 @@
+name: NP PoC00 Direct-charge safety (no credentials)
+on:
+  pull_request:
+    paths:
+      - 'poc/stripe-direct/**'
+      - '.github/workflows/poc00-direct-safety.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-policy:
+    name: Simulated Stripe security cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run offline test harness
+        run: node --test poc/stripe-direct/test/*.test.mjs
+  mercur-pinned-static-check:
+    name: Pinned Mercur source interface only
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: np
+      - uses: actions/checkout@v4
+        with:
+          repository: mercurjs/mercur
+          ref: 9fe557067193e0ad4dd3b7fd37e212f0b352ab3c
+          path: upstream-mercur
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate source-level baseline (not a Mercur runtime test)
+        run: node np/poc/stripe-direct/scripts/audit-upstream.mjs upstream-mercur
+
+  real-stripe-sdk-local-signature:
+    name: Stripe SDK v23 local signing only
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned Stripe SDK into disposable CI directory
+        run: npm install --prefix /tmp/np-stripe-sdk --no-save --ignore-scripts --no-audit --no-fund stripe@23.0.0
+      - name: Verify signature with actual SDK (zero network API requests)
+        env:
+          NODE_PATH: /tmp/np-stripe-sdk/node_modules
+        run: node poc/stripe-direct/scripts/test-real-stripe-sdk.cjs
