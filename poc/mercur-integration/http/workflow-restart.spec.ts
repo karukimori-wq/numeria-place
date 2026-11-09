@@ -81,6 +81,22 @@ it('restarts Medusa on surviving DB and standard reconciliation stops partial co
     expect(run).not.toHaveBeenCalled();expect(await snapshot()).toEqual(before);
     expect(await executionMetadata()).toEqual(storedBefore);expect(await stepMetadata()).toEqual(stepsBefore);
     expect((await database().query('SELECT state,stop_reason FROM np_poc_retry_queue WHERE order_id=$1',[data.orderId])).rows).toEqual([{state:data.boundary==='ack'?'completed':'review',stop_reason:data.boundary==='ack'?null:'partial_completion'}]);
+    if(data.boundary==='ack'){
+      // Disposable experiment only: replay actual completed Mercur workflow
+      // using its persisted identity, never fabricate a replacement identity.
+      expect(storedBefore).toHaveLength(1);
+      expect(storedBefore[0].state).toBe('done');
+      state.calls.length=0;
+      await engine.run('complete-cart-with-split-orders',{
+        transactionId:storedBefore[0].transaction_id,
+        input:{cart_id:data.cartId},
+      });
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
+      expect(state.calls.every(call=>call.method==='retrieve'&&call.account==='acct_Source123')).toBe(true);
+      expect((await ledger()).medusa_order_id).toBe(data.orderIds[0]);
+      console.log('PASS real completed workflow replay: persisted identity; order/link/session/collection/payment/capture IDs unchanged; no mutating provider call');
+    }
     // Inspect engine persistence availability without assuming that SIGKILL
     // synchronously flushed every engine step or that a workflow can resume.
     const engineTables=(await pg.raw("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '%workflow%' ORDER BY table_name")).rows;
